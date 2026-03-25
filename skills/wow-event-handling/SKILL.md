@@ -294,5 +294,5 @@ end
 ```
 
 - Cancel timers (AceTimer, C_Timer tickers)
-- Remove OnUpdate scripts - they run every frame even when the frame is hidden unless explicitly removed
+- Remove OnUpdate scripts when no longer needed (hiding a frame stops OnUpdate, but explicit cleanup is good practice for disabled modules)
 - Set script handlers to nil for clean teardown

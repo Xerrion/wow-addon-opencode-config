@@ -175,7 +175,7 @@ ns.Utils = {}
 local ADDON_NAME, ns = ...
 local L = LibStub("AceLocale-3.0"):NewLocale(ADDON_NAME, "enUS", true)
 if not L then return end
-L["enabled"] = true
+L["addon_loaded"] = "%s loaded."
 ```
 
 ### Step 5: Generate Options Files
@@ -194,14 +194,14 @@ ns.Layout = {
 
 **`$ARGUMENTS_Options/Core.lua`** - Options panel initialization with global bridge:
 ```lua
-local ns = _G["$ARGUMENTS" .. "NS"]
+local ns = _G["$ARGUMENTSNS"]
 if not ns then return end
 -- Options panel setup
 ```
 
 **`$ARGUMENTS_Options/Tabs/General.lua`** - First options tab:
 ```lua
-local ns = _G["$ARGUMENTS" .. "NS"]
+local ns = _G["$ARGUMENTSNS"]
 if not ns then return end
 -- General settings tab
 ```
@@ -220,7 +220,7 @@ if not ns then return end
     <Include file="Libs/AceLocale-3.0/AceLocale-3.0.xml"/>
     <Include file="Libs/AceTimer-3.0/AceTimer-3.0.xml"/>
     <Include file="Libs/LibSharedMedia-3.0/lib.xml"/>
-    <Include file="Libs/LibDataBroker-1.1/LibDataBroker-1.1.lua"/>
+    <Script file="Libs/LibDataBroker-1.1/LibDataBroker-1.1.lua"/>
     <Include file="Libs/LibDBIcon-1.0/LibDBIcon-1.0/lib.xml"/>
 </Ui>
 ```
@@ -313,7 +313,7 @@ read_globals = {
     "LibStub",
 
     -- Globals bridge
-    "$ARGUMENTS" .. "NS",
+    "$ARGUMENTSNS",
 }
 ```
 

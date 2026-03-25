@@ -11,6 +11,7 @@ set -euo pipefail
 # -- Colors -----------------------------------------------------------------
 
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 DIM='\033[0;90m'
 RESET='\033[0m'
 
@@ -24,6 +25,11 @@ AUTO_YES=false
 for arg in "$@"; do
     case "$arg" in
         --yes) AUTO_YES=true ;;
+        *)
+            printf "${RED}%s${RESET} Unknown option: %s\n" "✗" "$arg" >&2
+            echo "Usage: $0 [--yes]" >&2
+            exit 1
+            ;;
     esac
 done
 

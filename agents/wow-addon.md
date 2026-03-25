@@ -97,8 +97,8 @@ MyAddon/
   Libs/           -- Embedded libraries (Ace3, LibStub, etc.)
   Locales/        -- Localization files
   MyAddon.toc
-  MyAddon_Mainline.toc
-  MyAddon_Classic.toc
+  MyAddon_Vanilla.toc
+  MyAddon_Cata.toc
 MyAddon_Options/  -- Companion addon, LoadOnDemand
   Options.lua
   MyAddon_Options.toc

@@ -126,7 +126,7 @@ local ok, result = pcall(C_MythicPlus.GetCurrentAffixes)
 if ok and result then --[[ Retail only ]] end
 ```
 
-Constants: `WOW_PROJECT_MAINLINE` (Retail), `WOW_PROJECT_CLASSIC` (Era), `WOW_PROJECT_CATACLYSM_CLASSIC`. Use packager directives (`#@retail@` / `#@end-retail@`) in `.toc` files for build-time exclusion.
+Constants: `WOW_PROJECT_MAINLINE` (Retail), `WOW_PROJECT_CLASSIC` (Era), `WOW_PROJECT_CATACLYSM_CLASSIC`, `WOW_PROJECT_ANNIVERSARY_CLASSIC`. Use packager directives (`#@retail@` / `#@end-retail@`) in `.toc` files for build-time exclusion.
 
 ## 6. String Patterns (Not Regex)
 
@@ -247,8 +247,16 @@ end
 Wrap fallible operations and use `or` for defensive defaults:
 
 ```lua
-local ok, err = pcall(C_Item.GetItemInfo, itemID)
-if not ok then ns:Debug("GetItemInfo failed: %s", err); return nil end
+-- Non-throwing APIs: check return value for nil
+local info = C_Item.GetItemInfo(itemID)
+if not info then return nil end
+
+-- Throwing APIs: wrap in pcall
+local ok, result = pcall(SomeFunctionThatMayError, arg)
+if not ok then
+    ns:Debug("Error: %s", result)
+    return nil
+end
 
 local name = UnitName("target") or "Unknown"
 ```

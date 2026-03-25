@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+shopt -s nullglob
 
 # ---------------------------------------------------------------------------
 # install.sh - Copy WoW addon agents, skills, commands, and tools into OpenCode
