@@ -32,7 +32,7 @@ Agent, skills, commands, and custom tools for World of Warcraft addon developmen
 
 ```bash
 # 1. Clone this repo
-git clone <repo-url> ~/Projects/wow-addon-opencode-config
+git clone https://github.com/Xerrion/wow-addon-opencode-config.git ~/Projects/wow-addon-opencode-config
 
 # 2. Run the installer
 cd ~/Projects/wow-addon-opencode-config
@@ -48,7 +48,7 @@ git submodule update --init --recursive
 
 ```powershell
 # 1. Clone this repo
-git clone <repo-url> ~\Projects\wow-addon-opencode-config
+git clone https://github.com/Xerrion/wow-addon-opencode-config.git ~\Projects\wow-addon-opencode-config
 
 # 2. Run the installer
 cd ~\Projects\wow-addon-opencode-config

@@ -8,6 +8,7 @@
 
 #Requires -Version 5.1
 
+[CmdletBinding()]
 param(
     [switch]$Yes
 )
@@ -40,46 +41,35 @@ if (-not $Yes) {
     }
 }
 
-# -- Removal helpers --------------------------------------------------------
+# -- Removal helper ---------------------------------------------------------
 
-function Remove-ConfigFile {
+function Remove-ConfigItem {
+    [CmdletBinding()]
     param(
-        [string]$Target,
-        [string]$Label
+        [Parameter(Mandatory)][string]$Subdir,
+        [Parameter(Mandatory)][string]$Name,
+        [switch]$Recurse
     )
-
-    if (-not (Test-Path $Target)) {
-        return
+    $itemPath = Join-Path (Join-Path $ConfigDir $Subdir) $Name
+    if (Test-Path $itemPath) {
+        if ($Recurse) {
+            Remove-Item $itemPath -Recurse -Force
+        } else {
+            Remove-Item $itemPath -Force
+        }
+        Write-Host "  Removed: $Subdir/$Name" -ForegroundColor Green
+        $script:Removed++
+    } else {
+        Write-Host "  Already absent: $Subdir/$Name"
     }
-
-    Remove-Item $Target -Force
-    Write-Host -NoNewline -ForegroundColor Green "[ok] "
-    Write-Host "Removed $Label"
-    $script:Removed++
-}
-
-function Remove-ConfigDir {
-    param(
-        [string]$Target,
-        [string]$Label
-    )
-
-    if (-not (Test-Path $Target)) {
-        return
-    }
-
-    Remove-Item $Target -Recurse -Force
-    Write-Host -NoNewline -ForegroundColor Green "[ok] "
-    Write-Host "Removed $Label"
-    $script:Removed++
 }
 
 # -- Agents -----------------------------------------------------------------
 
 Write-Host "Agents:"
 foreach ($name in @("wow-addon.md")) {
-    Remove-ConfigFile -Target (Join-Path $ConfigDir "agents\$name") -Label $name
-    Remove-ConfigFile -Target (Join-Path $ConfigDir "agent\$name") -Label $name
+    Remove-ConfigItem -Subdir "agents" -Name $name
+    Remove-ConfigItem -Subdir "agent" -Name $name
 }
 
 # -- Skills -----------------------------------------------------------------
@@ -87,8 +77,8 @@ foreach ($name in @("wow-addon.md")) {
 Write-Host ""
 Write-Host "Skills:"
 foreach ($name in @("wow-addon-dev", "wow-lua-patterns", "wow-frame-api", "wow-event-handling")) {
-    Remove-ConfigDir -Target (Join-Path $ConfigDir "skills\$name") -Label $name
-    Remove-ConfigDir -Target (Join-Path $ConfigDir "skill\$name") -Label $name
+    Remove-ConfigItem -Subdir "skills" -Name $name -Recurse
+    Remove-ConfigItem -Subdir "skill" -Name $name -Recurse
 }
 
 # -- Commands ---------------------------------------------------------------
@@ -96,8 +86,8 @@ foreach ($name in @("wow-addon-dev", "wow-lua-patterns", "wow-frame-api", "wow-e
 Write-Host ""
 Write-Host "Commands:"
 foreach ($name in @("wow-review", "wow-scaffold")) {
-    Remove-ConfigFile -Target (Join-Path $ConfigDir "commands\$name.md") -Label "$name.md"
-    Remove-ConfigFile -Target (Join-Path $ConfigDir "command\$name.md") -Label "$name.md"
+    Remove-ConfigItem -Subdir "commands" -Name "$name.md"
+    Remove-ConfigItem -Subdir "command" -Name "$name.md"
 }
 
 # -- Tools ------------------------------------------------------------------
@@ -105,8 +95,8 @@ foreach ($name in @("wow-review", "wow-scaffold")) {
 Write-Host ""
 Write-Host "Tools:"
 foreach ($name in @("wow-api-lookup.ts", "wow-wiki-fetch.ts", "wow-event-info.ts", "wow-blizzard-source.ts", "wow-addon-lint.ts")) {
-    Remove-ConfigFile -Target (Join-Path $ConfigDir "tools\$name") -Label $name
-    Remove-ConfigFile -Target (Join-Path $ConfigDir "tool\$name") -Label $name
+    Remove-ConfigItem -Subdir "tools" -Name $name
+    Remove-ConfigItem -Subdir "tool" -Name $name
 }
 
 # -- Summary ----------------------------------------------------------------

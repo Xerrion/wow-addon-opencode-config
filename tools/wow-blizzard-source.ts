@@ -25,7 +25,7 @@ function assertFrameXMLExists(): void {
 function resolveFrameXMLPath(scope?: string): string {
   if (!scope) return FRAMEXML_BASE;
 
-  // Scope can be a file-type filter ("lua" / "xml") — these don't narrow the path
+  // Scope can be a file-type filter ("lua" / "xml") - these don't narrow the path
   if (scope === "lua" || scope === "xml") return FRAMEXML_BASE;
 
   // Otherwise treat scope as an addon directory name
@@ -73,7 +73,7 @@ async function runRg(args: string[]): Promise<string> {
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
 
-  // rg exits 1 when no matches — not an error
+  // rg exits 1 when no matches - not an error
   if (exitCode > 1) {
     throw new Error(`ripgrep failed (exit ${exitCode}): ${stderr.trim()}`);
   }
@@ -172,7 +172,7 @@ export default tool({
     query: tool.schema
       .string()
       .describe(
-        'Search term — function name, mixin name, pattern, or keyword. ' +
+        'Search term - function name, mixin name, pattern, or keyword. ' +
           'Examples: "FramerateFrameMixin", "ObjectiveTracker", "SetAttribute", "RegisterEvent"',
       ),
     scope: tool.schema
@@ -209,7 +209,7 @@ export default tool({
         return (
           `# Blizzard FrameXML Addons\n\n` +
           `No addon directories matching \`${query}\`.\n\n` +
-          `${addons.length} total directories available — ` +
+          `${addons.length} total directories available - ` +
           `try a broader term or omit the query to list all.`
         );
       }
@@ -309,7 +309,7 @@ export default tool({
       `- Try a broader scope (omit scope to search everything)\n` +
       `- Search for the mixin or function name alone (e.g. "OnLoad" instead of "MyMixin:OnLoad")\n` +
       `- Use mode "list" with your query to find relevant addon directories\n` +
-      `- Check spelling — Blizzard source names are case-sensitive`
+      `- Check spelling - Blizzard source names are case-sensitive`
     );
   },
 });

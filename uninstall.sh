@@ -10,10 +10,10 @@ set -euo pipefail
 
 # -- Colors -----------------------------------------------------------------
 
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-DIM='\033[0;90m'
-RESET='\033[0m'
+GREEN=$'\033[0;32m'
+RED=$'\033[0;31m'
+DIM=$'\033[0;90m'
+RESET=$'\033[0m'
 
 # -- Resolve paths ----------------------------------------------------------
 
@@ -26,7 +26,7 @@ for arg in "$@"; do
     case "$arg" in
         --yes) AUTO_YES=true ;;
         *)
-            printf "${RED}%s${RESET} Unknown option: %s\n" "✗" "$arg" >&2
+            printf '%s\n' "${RED}✗${RESET} Unknown option: ${arg}" >&2
             echo "Usage: $0 [--yes]" >&2
             exit 1
             ;;
@@ -58,31 +58,22 @@ if [ "$AUTO_YES" = false ]; then
     esac
 fi
 
-# -- Removal helpers --------------------------------------------------------
+# -- Removal helper ---------------------------------------------------------
 
-remove_file() {
-    local target="$1"
-    local label="$2"
+remove_item() {
+    local subdir="$1" name="$2" kind="$3"  # kind: "file" or "dir"
+    local path="${CONFIG_DIR}/${subdir}/${name}"
 
-    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+    if [ ! -e "$path" ] && [ ! -L "$path" ]; then
         return 0
     fi
 
-    rm "$target"
-    printf "${GREEN}%s${RESET} Removed %s\n" "✓" "$label"
-    REMOVED=$((REMOVED + 1))
-}
-
-remove_dir() {
-    local target="$1"
-    local label="$2"
-
-    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
-        return 0
+    if [ "$kind" = "dir" ]; then
+        rm -rf "$path"
+    else
+        rm -f "$path"
     fi
-
-    rm -rf "$target"
-    printf "${GREEN}%s${RESET} Removed %s\n" "✓" "$label"
+    printf '%s\n' "${GREEN}✓${RESET} Removed ${subdir}/${name}"
     REMOVED=$((REMOVED + 1))
 }
 
@@ -90,8 +81,8 @@ remove_dir() {
 
 echo "Agents:"
 for name in wow-addon.md; do
-    remove_file "${CONFIG_DIR}/agents/${name}" "$name"
-    remove_file "${CONFIG_DIR}/agent/${name}" "$name"
+    remove_item "agents" "$name" "file"
+    remove_item "agent" "$name" "file"
 done
 
 # -- Skills -----------------------------------------------------------------
@@ -99,8 +90,8 @@ done
 echo ""
 echo "Skills:"
 for name in wow-addon-dev wow-lua-patterns wow-frame-api wow-event-handling; do
-    remove_dir "${CONFIG_DIR}/skills/${name}" "$name"
-    remove_dir "${CONFIG_DIR}/skill/${name}" "$name"
+    remove_item "skills" "$name" "dir"
+    remove_item "skill" "$name" "dir"
 done
 
 # -- Commands ---------------------------------------------------------------
@@ -108,8 +99,8 @@ done
 echo ""
 echo "Commands:"
 for name in wow-review wow-scaffold; do
-    remove_file "${CONFIG_DIR}/commands/${name}.md" "${name}.md"
-    remove_file "${CONFIG_DIR}/command/${name}.md" "${name}.md"
+    remove_item "commands" "${name}.md" "file"
+    remove_item "command" "${name}.md" "file"
 done
 
 # -- Tools ------------------------------------------------------------------
@@ -117,8 +108,8 @@ done
 echo ""
 echo "Tools:"
 for name in wow-api-lookup.ts wow-wiki-fetch.ts wow-event-info.ts wow-blizzard-source.ts wow-addon-lint.ts; do
-    remove_file "${CONFIG_DIR}/tools/${name}" "$name"
-    remove_file "${CONFIG_DIR}/tool/${name}" "$name"
+    remove_item "tools" "$name" "file"
+    remove_item "tool" "$name" "file"
 done
 
 # -- Summary ----------------------------------------------------------------

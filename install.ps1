@@ -36,10 +36,11 @@ if (-not (Test-Path $ConfigDir -PathType Container)) {
 # names. We detect which variant exists, falling back to sensible defaults.
 
 function Resolve-ConfigSubdir {
+    [CmdletBinding()]
     param(
-        [string]$Plural,
-        [string]$Singular,
-        [string]$Default
+        [Parameter(Mandatory)][string]$Plural,
+        [Parameter(Mandatory)][string]$Singular,
+        [Parameter(Mandatory)][string]$Default
     )
 
     $pluralPath = Join-Path $ConfigDir $Plural
@@ -65,10 +66,11 @@ $ToolsDir = Resolve-ConfigSubdir "tools" "tool" "tools"
 # -- Copy helper ------------------------------------------------------------
 
 function Install-ConfigItem {
+    [CmdletBinding()]
     param(
-        [string]$Source,
-        [string]$Target,
-        [string]$Label,
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$Label,
         [switch]$IsDirectory
     )
 
@@ -113,10 +115,27 @@ function Install-ConfigItem {
     $script:Installed++
 }
 
+# -- Source directory guard --------------------------------------------------
+
+function Assert-SourceDir {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Label
+    )
+    if (-not (Test-Path $Path)) {
+        Write-Host "ERROR: Source directory not found: $Path" -ForegroundColor Red
+        Write-Host "Ensure you are running from a complete clone of the repository." -ForegroundColor Yellow
+        exit 1
+    }
+}
+
 # -- Agents (individual .md files) ------------------------------------------
 
 Write-Host "Agents:"
-$agentFiles = Get-ChildItem -Path (Join-Path $ScriptDir "agents") -Filter "*.md" -File
+$agentsSourceDir = Join-Path $ScriptDir "agents"
+Assert-SourceDir -Path $agentsSourceDir -Label "agents"
+$agentFiles = Get-ChildItem -Path $agentsSourceDir -Filter "*.md" -File
 foreach ($file in $agentFiles) {
     $targetPath = Join-Path $AgentsDir $file.Name
     Install-ConfigItem -Source $file.FullName -Target $targetPath -Label $file.Name
@@ -126,7 +145,9 @@ foreach ($file in $agentFiles) {
 
 Write-Host ""
 Write-Host "Skills:"
-$skillDirs = Get-ChildItem -Path (Join-Path $ScriptDir "skills") -Directory
+$skillsSourceDir = Join-Path $ScriptDir "skills"
+Assert-SourceDir -Path $skillsSourceDir -Label "skills"
+$skillDirs = Get-ChildItem -Path $skillsSourceDir -Directory
 foreach ($dir in $skillDirs) {
     $targetPath = Join-Path $SkillsDir $dir.Name
     Install-ConfigItem -Source $dir.FullName -Target $targetPath -Label $dir.Name -IsDirectory
@@ -136,7 +157,9 @@ foreach ($dir in $skillDirs) {
 
 Write-Host ""
 Write-Host "Commands:"
-$commandFiles = Get-ChildItem -Path (Join-Path $ScriptDir "commands") -Filter "*.md" -File
+$commandsSourceDir = Join-Path $ScriptDir "commands"
+Assert-SourceDir -Path $commandsSourceDir -Label "commands"
+$commandFiles = Get-ChildItem -Path $commandsSourceDir -Filter "*.md" -File
 foreach ($file in $commandFiles) {
     $targetPath = Join-Path $CommandsDir $file.Name
     Install-ConfigItem -Source $file.FullName -Target $targetPath -Label $file.Name
@@ -146,7 +169,9 @@ foreach ($file in $commandFiles) {
 
 Write-Host ""
 Write-Host "Tools:"
-$toolFiles = Get-ChildItem -Path (Join-Path $ScriptDir "tools") -Filter "*.ts" -File
+$toolsSourceDir = Join-Path $ScriptDir "tools"
+Assert-SourceDir -Path $toolsSourceDir -Label "tools"
+$toolFiles = Get-ChildItem -Path $toolsSourceDir -Filter "*.ts" -File
 foreach ($file in $toolFiles) {
     $targetPath = Join-Path $ToolsDir $file.Name
     Install-ConfigItem -Source $file.FullName -Target $targetPath -Label $file.Name
@@ -159,6 +184,6 @@ Write-Host "Done! $Installed items installed, $Skipped skipped."
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  1. Ensure wow-annotations are installed:"
-Write-Host "     git clone https://github.com/Ketho/vscode-wow-api ~/.local/share/wow-annotations"
-Write-Host "     cd ~/.local/share/wow-annotations && git submodule update --init --recursive"
+Write-Host "     git clone https://github.com/Ketho/vscode-wow-api $env:USERPROFILE\.local\share\wow-annotations"
+Write-Host "     cd $env:USERPROFILE\.local\share\wow-annotations && git submodule update --init --recursive"
 Write-Host "  2. See README.md for full setup instructions"

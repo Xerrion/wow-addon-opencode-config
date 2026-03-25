@@ -11,10 +11,10 @@ shopt -s nullglob
 
 # -- Colors -----------------------------------------------------------------
 
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-RESET='\033[0m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[0;33m'
+RED=$'\033[0;31m'
+RESET=$'\033[0m'
 
 # -- Resolve paths ----------------------------------------------------------
 
@@ -33,7 +33,7 @@ for arg in "$@"; do
     case "$arg" in
         --force) FORCE=true ;;
         *)
-            printf "${RED}%s${RESET} Unknown option: %s\n" "✗" "$arg" >&2
+            printf '%s\n' "${RED}✗${RESET} Unknown option: ${arg}" >&2
             echo "Usage: $0 [--force]" >&2
             exit 1
             ;;
@@ -43,7 +43,7 @@ done
 # -- Guard: OpenCode must be installed --------------------------------------
 
 if [ ! -d "$CONFIG_DIR" ]; then
-    printf "${RED}%s${RESET} OpenCode config directory not found. Install OpenCode first.\n" "✗" >&2
+    printf '%s\n' "${RED}✗${RESET} OpenCode config directory not found. Install OpenCode first." >&2
     exit 1
 fi
 
@@ -81,7 +81,7 @@ install_item() {
 
     # Source must exist - fail fast on bad repo state
     if [ ! -e "$source" ]; then
-        printf "${RED}%s${RESET} Source not found: %s\n" "✗" "$source" >&2
+        printf '%s\n' "${RED}✗${RESET} Source not found: ${source}" >&2
         return 1
     fi
 
@@ -91,7 +91,7 @@ install_item() {
             rm -rf "$target"
             replaced=true
         else
-            printf "${YELLOW}%s${RESET} Skipped %s (already exists, use --force to replace)\n" "-" "$label"
+            printf '%s\n' "${YELLOW}-${RESET} Skipped ${label} (already exists, use --force to replace)"
             SKIPPED=$((SKIPPED + 1))
             return 0
         fi
@@ -105,9 +105,9 @@ install_item() {
     fi
 
     if [ "$replaced" = true ]; then
-        printf "${YELLOW}  Replaced %s${RESET}\n" "$label"
+        printf '%s\n' "${YELLOW}  Replaced ${label}${RESET}"
     else
-        printf "${GREEN}%s${RESET} Installed %s\n" "✓" "$label"
+        printf '%s\n' "${GREEN}✓${RESET} Installed ${label}"
     fi
     INSTALLED=$((INSTALLED + 1))
 }
