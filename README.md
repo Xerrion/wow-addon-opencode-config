@@ -6,7 +6,7 @@ Agent, skills, commands, and custom tools for World of Warcraft addon developmen
 
 | Type | Name | Description |
 | --- | --- | --- |
-| **Agent** | `wow-addon` | WoW addon development expert - API lookups, code review, event handling, UI patterns |
+| **Agent** | `wow-addon` | WoW addon research subagent - API lookups, event payloads, Blizzard source patterns, best-practice guidance |
 | **Skill** | `wow-addon-dev` | Core tool reference - all 5 custom tools documented with usage examples |
 | **Skill** | `wow-lua-patterns` | WoW Lua idioms - namespace pattern, global caching, metatables, hooks, SavedVariables |
 | **Skill** | `wow-frame-api` | Frame/UI API - CreateFrame, anchoring, backdrops, animations, widgets, taint avoidance |
