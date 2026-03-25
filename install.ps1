@@ -1,13 +1,15 @@
 # ---------------------------------------------------------------------------
 # install.ps1 - Install WoW addon agents, skills, commands, and tools into OpenCode
 #
-# Usage: .\install.ps1 [-Force]
-#   -Force  Replace existing files/directories instead of skipping
+# Usage: .\install.ps1 [-Force] [-Annotations]
+#   -Force        Replace existing files/directories instead of skipping
+#   -Annotations  Run maintain-annotations.ps1 after install
 # ---------------------------------------------------------------------------
 
 [CmdletBinding()]
 param(
-    [switch]$Force
+    [switch]$Force,
+    [switch]$Annotations
 )
 
 Set-StrictMode -Version Latest
@@ -181,9 +183,39 @@ foreach ($file in $toolFiles) {
 
 Write-Host ""
 Write-Host "Done! $Installed items installed, $Skipped skipped."
+
+# -- Annotations (optional) -------------------------------------------------
+
+$isAnnotationsOk = $false
+if ($Annotations) {
+    Write-Host ""
+    Write-Host "Setting up annotations..."
+    try {
+        $psExe = if ($PSVersionTable.PSEdition -eq "Core") { "pwsh" } else { "powershell" }
+        & $psExe -NoProfile -File (Join-Path $ScriptDir "maintain-annotations.ps1")
+        if ($LASTEXITCODE -eq 0) {
+            $isAnnotationsOk = $true
+        }
+        else {
+            throw "maintain-annotations.ps1 exited with code $LASTEXITCODE"
+        }
+    }
+    catch {
+        Write-Host "X" -ForegroundColor Red -NoNewline
+        Write-Host " Annotation setup failed (config install succeeded - run maintain-annotations.ps1 manually)"
+        Write-Warning $_.Exception.Message
+    }
+}
+
+# -- Next steps -------------------------------------------------------------
+
 Write-Host ""
 Write-Host "Next steps:"
-Write-Host "  1. Ensure wow-annotations are installed:"
-Write-Host "     git clone https://github.com/Ketho/vscode-wow-api $env:USERPROFILE\.local\share\wow-annotations"
-Write-Host "     cd $env:USERPROFILE\.local\share\wow-annotations && git submodule update --init --recursive"
-Write-Host "  2. See README.md for full setup instructions"
+if ($isAnnotationsOk) {
+    Write-Host "  1. See README.md for multi-flavor annotation details"
+}
+else {
+    Write-Host "  1. Set up annotations:"
+    Write-Host "     .\maintain-annotations.ps1"
+    Write-Host "  2. See README.md for full setup instructions"
+}

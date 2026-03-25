@@ -2,37 +2,73 @@ import { tool } from "@opencode-ai/plugin";
 import path from "node:path";
 import { readdirSync, existsSync, statSync } from "node:fs";
 
-const FRAMEXML_BASE = path.join(
+const LEGACY_FRAMEXML_BASE = path.join(
   process.env.HOME || "~",
   ".local/share/wow-annotations/Annotations/FrameXML/Annotations",
 );
 
-const ADDONS_DIR = path.join(FRAMEXML_BASE, "AddOns");
+const FRAMEXML_DIR = path.join(
+  process.env.HOME || "~",
+  ".local/share/wow-framexml",
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function assertFrameXMLExists(): void {
-  if (!existsSync(FRAMEXML_BASE)) {
+/**
+ * Resolve the FrameXML base directory for a given WoW version.
+ *
+ * - Explicit version: use multi-flavor path, throw if missing.
+ * - No version: try multi-flavor "live" first, fall back to legacy Ketho path.
+ */
+function resolveFrameXMLBase(version?: string): string {
+  if (version !== undefined) {
+    const multiFlavorPath = path.join(FRAMEXML_DIR, version, "Annotations");
+    if (!existsSync(multiFlavorPath)) {
+      throw new Error(
+        `Multi-flavor FrameXML annotations not found at ${multiFlavorPath}. ` +
+          "Run maintain-annotations.sh to set up multi-flavor annotations.",
+      );
+    }
+    return multiFlavorPath;
+  }
+
+  // No version specified - try multi-flavor "live" first for seamless upgrade
+  const liveMultiFlavorPath = path.join(FRAMEXML_DIR, "live", "Annotations");
+  if (existsSync(liveMultiFlavorPath)) {
+    return liveMultiFlavorPath;
+  }
+
+  // Fall back to legacy Ketho submodule path
+  return LEGACY_FRAMEXML_BASE;
+}
+
+function assertFrameXMLExists(framexmlBase: string): void {
+  if (!existsSync(framexmlBase)) {
     throw new Error(
-      `FrameXML annotations not found at ${FRAMEXML_BASE}. ` +
-        "Install wow-annotations to ~/.local/share/wow-annotations/",
+      `FrameXML annotations not found at ${framexmlBase}. ` +
+        "Install wow-annotations to ~/.local/share/wow-annotations/ " +
+        "or run maintain-annotations.sh for multi-flavor support.",
     );
   }
 }
 
-function resolveFrameXMLPath(scope?: string): string {
-  if (!scope) return FRAMEXML_BASE;
+function resolveFrameXMLPath(
+  framexmlBase: string,
+  addonsDir: string,
+  scope?: string,
+): string {
+  if (!scope) return framexmlBase;
 
   // Scope can be a file-type filter ("lua" / "xml") - these don't narrow the path
-  if (scope === "lua" || scope === "xml") return FRAMEXML_BASE;
+  if (scope === "lua" || scope === "xml") return framexmlBase;
 
   // Otherwise treat scope as an addon directory name
-  const addonPath = path.join(ADDONS_DIR, scope);
+  const addonPath = path.join(addonsDir, scope);
   if (!existsSync(addonPath) || !statSync(addonPath).isDirectory()) {
     throw new Error(
-      `Addon "${scope}" not found under ${ADDONS_DIR}. ` +
+      `Addon "${scope}" not found under ${addonsDir}. ` +
         'Use mode "list" to see available addon directories.',
     );
   }
@@ -45,13 +81,13 @@ function globForScope(scope?: string): string {
   return "*.lua";
 }
 
-function stripBasePath(absolutePath: string): string {
-  return absolutePath.startsWith(FRAMEXML_BASE)
-    ? absolutePath.slice(FRAMEXML_BASE.length + 1)
+function stripBasePath(framexmlBase: string, absolutePath: string): string {
+  return absolutePath.startsWith(framexmlBase)
+    ? absolutePath.slice(framexmlBase.length + 1)
     : absolutePath;
 }
 
-function formatSourceOutput(raw: string): string {
+function formatSourceOutput(framexmlBase: string, raw: string): string {
   return raw
     .split("\n")
     .map((line) => {
@@ -59,7 +95,7 @@ function formatSourceOutput(raw: string): string {
       if (colonIdx === -1) return line;
       const filePart = line.slice(0, colonIdx);
       const rest = line.slice(colonIdx);
-      return stripBasePath(filePart) + rest;
+      return stripBasePath(framexmlBase, filePart) + rest;
     })
     .join("\n");
 }
@@ -125,14 +161,14 @@ function countFilesByPattern(dirPath: string, suffix: string): number {
   }
 }
 
-function listAddons(): AddonInfo[] {
-  if (!existsSync(ADDONS_DIR)) return [];
+function listAddons(addonsDir: string): AddonInfo[] {
+  if (!existsSync(addonsDir)) return [];
 
-  const entries = readdirSync(ADDONS_DIR, { withFileTypes: true });
+  const entries = readdirSync(addonsDir, { withFileTypes: true });
   return entries
     .filter((e) => e.isDirectory())
     .map((e) => {
-      const addonPath = path.join(ADDONS_DIR, e.name);
+      const addonPath = path.join(addonsDir, e.name);
       return {
         name: e.name,
         luaCount: countFilesByPattern(addonPath, ".lua.annotated.lua"),
@@ -167,7 +203,8 @@ export default tool({
     "Search Blizzard's FrameXML source code (with LuaLS annotations) for implementation patterns, " +
     "mixin definitions, UI template usage, and real-world examples of how Blizzard builds their own UI. " +
     "Covers 307 addon directories including ActionBar, AuctionHouseUI, ChatFrame, CompactRaidFrames, " +
-    "ObjectiveTracker, Professions, Settings, SharedXML, and more.",
+    "ObjectiveTracker, Professions, Settings, SharedXML, and more. " +
+    "Supports multi-flavor annotations (live/classic/classic_era/classic_anniversary) via the version parameter.",
   args: {
     query: tool.schema
       .string()
@@ -190,15 +227,26 @@ export default tool({
       .describe(
         '"search" (default) searches file contents; "list" lists addon directories or files matching the query',
       ),
+    version: tool.schema
+      .enum(["live", "classic", "classic_era", "classic_anniversary"])
+      .optional()
+      .describe(
+        'WoW version to search. "live" (default) for retail, "classic" for Classic/MoP, ' +
+          '"classic_era" for Classic Era, "classic_anniversary" for Anniversary. ' +
+          "Requires multi-flavor annotations via maintain-annotations.sh.",
+      ),
   },
   async execute(args) {
-    const { query, scope, mode = "search" } = args;
+    const { query, scope, mode = "search", version } = args;
 
-    assertFrameXMLExists();
+    const framexmlBase = resolveFrameXMLBase(version);
+    const addonsDir = path.join(framexmlBase, "AddOns");
+
+    assertFrameXMLExists(framexmlBase);
 
     // ---- List mode --------------------------------------------------------
     if (mode === "list") {
-      const addons = listAddons();
+      const addons = listAddons(addonsDir);
       if (addons.length === 0) {
         return "No addon directories found under AddOns/.";
       }
@@ -230,7 +278,7 @@ export default tool({
       return 'Error: query must not be empty for search mode. Use mode "list" to browse addons.';
     }
 
-    const searchPath = resolveFrameXMLPath(scope);
+    const searchPath = resolveFrameXMLPath(framexmlBase, addonsDir, scope);
     const fileGlob = globForScope(scope);
     const scopeLabel = scope || "all";
 
@@ -244,7 +292,7 @@ export default tool({
       30,
     );
     if (results) {
-      const formatted = formatSourceOutput(results);
+      const formatted = formatSourceOutput(framexmlBase, results);
       const lineCount = formatted.split("\n").length;
       const note =
         lineCount >= 200
@@ -268,7 +316,7 @@ export default tool({
       20,
     );
     if (results) {
-      const formatted = formatSourceOutput(results);
+      const formatted = formatSourceOutput(framexmlBase, results);
       return (
         `# Blizzard FrameXML Source (case-insensitive match)\n\n` +
         `Query: \`${query}\` | Scope: ${scopeLabel}\n\n` +
@@ -287,7 +335,7 @@ export default tool({
       const files = fileResults.split("\n").filter(Boolean);
       const listed = files
         .slice(0, 20)
-        .map((f) => `- ${stripBasePath(f)}`)
+        .map((f) => `- ${stripBasePath(framexmlBase, f)}`)
         .join("\n");
       const extra =
         files.length > 20

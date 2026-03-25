@@ -5,8 +5,9 @@ shopt -s nullglob
 # ---------------------------------------------------------------------------
 # install.sh - Copy WoW addon agents, skills, commands, and tools into OpenCode
 #
-# Usage: ./install.sh [--force]
-#   --force  Replace existing files/directories instead of skipping
+# Usage: ./install.sh [--force] [--annotations]
+#   --force        Replace existing files/directories instead of skipping
+#   --annotations  Run maintain-annotations.sh after install
 # ---------------------------------------------------------------------------
 
 # -- Colors -----------------------------------------------------------------
@@ -24,6 +25,7 @@ CONFIG_DIR="${HOME}/.config/opencode"
 # -- State ------------------------------------------------------------------
 
 FORCE=false
+ANNOTATIONS=false
 INSTALLED=0
 SKIPPED=0
 
@@ -32,9 +34,10 @@ SKIPPED=0
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=true ;;
+        --annotations) ANNOTATIONS=true ;;
         *)
             printf '%s\n' "${RED}✗${RESET} Unknown option: ${arg}" >&2
-            echo "Usage: $0 [--force]" >&2
+            echo "Usage: $0 [--force] [--annotations]" >&2
             exit 1
             ;;
     esac
@@ -151,9 +154,28 @@ done
 
 echo ""
 echo "Done! ${INSTALLED} items installed, ${SKIPPED} skipped."
+
+# -- Annotations (optional) -------------------------------------------------
+
+is_annotations_ok=false
+if [ "$ANNOTATIONS" = true ]; then
+    echo ""
+    echo "Setting up annotations..."
+    if "${SCRIPT_DIR}/maintain-annotations.sh"; then
+        is_annotations_ok=true
+    else
+        printf '%s\n' "${RED}✗${RESET} Annotation setup failed (config install succeeded - run maintain-annotations.sh manually)" >&2
+    fi
+fi
+
+# -- Next steps -------------------------------------------------------------
+
 echo ""
 echo "Next steps:"
-echo "  1. Ensure wow-annotations are installed:"
-echo "     git clone https://github.com/Ketho/vscode-wow-api ~/.local/share/wow-annotations"
-echo "     cd ~/.local/share/wow-annotations && git submodule update --init --recursive"
-echo "  2. See README.md for full setup instructions"
+if [ "$is_annotations_ok" = true ]; then
+    echo "  1. See README.md for multi-flavor annotation details"
+else
+    echo "  1. Set up annotations:"
+    echo "     ./maintain-annotations.sh"
+    echo "  2. See README.md for full setup instructions"
+fi
