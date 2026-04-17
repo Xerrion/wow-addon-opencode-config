@@ -1,8 +1,9 @@
 import { tool } from "@opencode-ai/plugin";
+import os from "node:os";
 import path from "node:path";
 
 const ANNOTATIONS_ROOT = path.join(
-  process.env.HOME || "~",
+  os.homedir(),
   ".local/share/wow-annotations/Annotations",
 );
 

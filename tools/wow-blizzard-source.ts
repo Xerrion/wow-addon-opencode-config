@@ -1,14 +1,15 @@
 import { tool } from "@opencode-ai/plugin";
+import os from "node:os";
 import path from "node:path";
 import { readdirSync, existsSync, statSync } from "node:fs";
 
 const LEGACY_FRAMEXML_BASE = path.join(
-  process.env.HOME || "~",
+  os.homedir(),
   ".local/share/wow-annotations/Annotations/FrameXML/Annotations",
 );
 
 const FRAMEXML_DIR = path.join(
-  process.env.HOME || "~",
+  os.homedir(),
   ".local/share/wow-framexml",
 );
 

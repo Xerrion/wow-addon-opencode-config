@@ -1,4 +1,5 @@
 import { tool } from "@opencode-ai/plugin";
+import os from "node:os";
 import path from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -109,7 +110,8 @@ function isFilePath(target: string): boolean {
 function resolveFilePath(target: string): string {
   const trimmed = target.trim();
   if (trimmed.startsWith("~")) {
-    return path.join(process.env.HOME || "~", trimmed.slice(1));
+    const rest = trimmed.slice(1).replace(/^[/\\]/, "");
+    return path.join(os.homedir(), rest);
   }
   return trimmed;
 }

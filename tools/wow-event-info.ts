@@ -1,4 +1,5 @@
 import { tool } from "@opencode-ai/plugin";
+import os from "node:os";
 import path from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -6,7 +7,7 @@ import path from "node:path";
 // ---------------------------------------------------------------------------
 
 const EVENT_LUA_PATH = path.join(
-  process.env.HOME || "~",
+  os.homedir(),
   ".local/share/wow-annotations/Annotations/Core/Data/Event.lua",
 );
 
