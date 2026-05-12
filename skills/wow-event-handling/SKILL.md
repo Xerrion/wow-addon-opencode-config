@@ -1,15 +1,15 @@
 ---
 name: wow-event-handling
-description: WoW event registration, dispatching, and lifecycle patterns. Load when working with events, listeners, or combat-sensitive code. Covers raw events, AceEvent, OnEvent dispatch, ADDON_LOADED bootstrapping, combat lockdown guards, event throttling, listener factories, and common event sequences.
+description: Load when explaining or reviewing addon event-handling code. Documents how WoW addons register, dispatch, throttle, and clean up events using raw frame:RegisterEvent, AceEvent-3.0, and EventRegistry.
 ---
 
 # WoW Event Handling Patterns
 
-ALWAYS use the `wow-api-lookup` tool to verify event payloads before writing handlers. Do not guess at arguments.
+A catalog of the event-handling shapes addons rely on. Event names and payload shapes are best confirmed via `wow-event-info`; the snippets below illustrate the dispatch and lifecycle patterns those events sit inside.
 
 ## 1. Raw Event Registration
 
-Every event handler needs a frame. No frame, no events.
+Every event handler is bound to a frame — without a frame there is no handler:
 
 ```lua
 local frame = CreateFrame("Frame")
@@ -24,14 +24,16 @@ frame:SetScript("OnEvent", function(self, event, ...)
 end)
 ```
 
-- `RegisterEvent(name)` - start listening
-- `UnregisterEvent(name)` - stop listening for one event
-- `UnregisterAllEvents()` - stop all events on that frame
-- `IsEventRegistered(name)` - check before double-registering
+- `RegisterEvent(name)` starts listening
+- `UnregisterEvent(name)` stops listening for one event
+- `UnregisterAllEvents()` stops every event on that frame
+- `IsEventRegistered(name)` distinguishes a fresh registration from a re-registration
 
 ## 2. Dispatch Patterns
 
-### Method dispatch (preferred for many events)
+### Method dispatch
+
+A common form is to look up a method on `self` named exactly after the event:
 
 ```lua
 frame:SetScript("OnEvent", function(self, event, ...)
@@ -48,11 +50,11 @@ function frame:LOOT_OPENED(autoLoot)
 end
 ```
 
-- Method name matches event name exactly
-- Clean - no if/elseif chain
-- Adding a handler = defining a method + registering the event
+Adding a handler is then "define a method, register the event" — no central if/elseif chain.
 
-### Table dispatch (alternative)
+### Table dispatch
+
+A nearby variant uses a separate handler table:
 
 ```lua
 local handlers = {}
@@ -90,10 +92,10 @@ function MyAddon:OnDisable()
 end
 ```
 
-- No frame needed - AceEvent handles it internally
-- Second arg to `RegisterEvent` routes to a custom method name
-- `RegisterMessage` / `SendMessage` for inter-addon communication
-- `UnregisterEvent` / `UnregisterAllEvents` for cleanup
+- AceEvent owns the underlying frame; addon code does not create one
+- The second argument to `RegisterEvent` routes the event to a custom method name
+- `RegisterMessage` / `SendMessage` provide an inter-addon (or intra-addon) message bus
+- `UnregisterEvent` / `UnregisterAllEvents` mirror the raw API for cleanup
 
 ## 4. ADDON_LOADED Bootstrap
 
@@ -103,36 +105,27 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:SetScript("OnEvent", function(self, event, addonName)
     if addonName ~= ADDON_NAME then return end
     self:UnregisterEvent("ADDON_LOADED")
-    -- Safe to access SavedVariables here
-    -- Initialize your addon
+    -- SavedVariables are available here
+    -- Initialization runs from this point
 end)
 ```
 
-- Fires once per addon when its files finish loading
-- **First argument is the addon name** - ALWAYS guard with an early return
-- SavedVariables are available at this point
-- Unregister immediately after handling your own load
-- For Ace3 addons, use `OnInitialize()` instead (fires at ADDON_LOADED time)
+`ADDON_LOADED` fires once per addon when its files finish loading. The first payload argument is the addon name, so a typical handler early-returns on a name mismatch and unregisters itself once the matching event arrives. SavedVariables are populated by this point. Ace3 addons usually use `OnInitialize()`, which runs at the same moment.
 
 ## 5. Login Event Sequence
 
-Order matters. Know it cold:
+The order at login is fixed:
 
-1. `ADDON_LOADED` - per addon, SavedVariables available
-2. `PLAYER_LOGIN` - character data available, UI visible
-3. `PLAYER_ENTERING_WORLD` (isInitialLogin=true) - world fully loaded
-4. `LOADING_SCREEN_DISABLED` - loading screen gone
+1. `ADDON_LOADED` — per-addon, SavedVariables available
+2. `PLAYER_LOGIN` — character data available, UI visible
+3. `PLAYER_ENTERING_WORLD` (with `isInitialLogin=true`) — world fully loaded
+4. `LOADING_SCREEN_DISABLED` — loading screen gone
 
-Key differences:
-
-- `PLAYER_LOGIN` fires ONCE per session
-- `PLAYER_ENTERING_WORLD` fires on every loading screen (instance changes, portals, etc.)
-- Use `PLAYER_LOGIN` for one-time setup
-- Use `PLAYER_ENTERING_WORLD` for state that needs refresh on zone changes
+`PLAYER_LOGIN` fires once per session. `PLAYER_ENTERING_WORLD` fires on every loading screen (instance changes, portals, hearths). One-time setup typically sits on `PLAYER_LOGIN`; state that needs refresh on zone changes sits on `PLAYER_ENTERING_WORLD`.
 
 ## 6. Combat Lockdown
 
-Protected actions fail silently in combat. Guard them or lose them.
+Protected actions fail silently in combat. A typical guard pattern defers the action until combat ends:
 
 ```lua
 function MyAddon:DoSecureAction()
@@ -154,14 +147,12 @@ end
 ```
 
 - `InCombatLockdown()` returns true during combat
-- `PLAYER_REGEN_DISABLED` = entering combat
-- `PLAYER_REGEN_ENABLED` = leaving combat
-- Secure frame modifications (Show, Hide, SetPoint, SetParent on protected frames) FAIL SILENTLY in combat
-- ALWAYS guard secure operations with an `InCombatLockdown()` check
+- `PLAYER_REGEN_DISABLED` marks combat entry; `PLAYER_REGEN_ENABLED` marks combat exit
+- Secure frame modifications (Show, Hide, SetPoint, SetParent on protected frames) are rejected during combat — the typical pattern is to detect and defer
 
 ## 7. Event Throttling and Batching
 
-Some events fire in rapid bursts. Batch them.
+Some events fire in rapid bursts; addons commonly batch them with a debounced timer:
 
 ```lua
 local pending = false
@@ -175,77 +166,25 @@ function MyAddon:BAG_UPDATE()
 end
 ```
 
-AceBucket-3.0 provides built-in batching:
+AceBucket-3.0 wraps the same idea:
 
 ```lua
 -- Collects all BAG_UPDATE firings within 0.2s, then calls handler once
 self:RegisterBucketEvent("BAG_UPDATE", 0.2, "ProcessBagUpdate")
 ```
 
-## 8. Listener Factory Pattern
-
-Shared logic with version-specific variants - useful for cross-version addons.
-
-Shared factory (`Listeners/Loot_Shared.lua`):
-
-```lua
-local _, ns = ...
-
-ns.LootListener = {}
-
-function ns.LootListener.Create(config)
-    local listener = {}
-
-    function listener:Start()
-        ns.Addon:RegisterEvent(config.openEvent, function(_, ...)
-            self:OnOpen(...)
-        end)
-        ns.Addon:RegisterEvent(config.closeEvent, function()
-            self:OnClose()
-        end)
-    end
-
-    function listener:OnOpen(...)
-        -- shared logic using config values
-    end
-
-    function listener:OnClose()
-        -- shared cleanup
-    end
-
-    return listener
-end
-```
-
-Version-specific (`Listeners/Loot_Retail.lua`):
-
-```lua
-local _, ns = ...
-if WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE then return end
-
-local listener = ns.LootListener.Create({
-    openEvent = "LOOT_READY",
-    closeEvent = "LOOT_CLOSED",
-})
-listener:Start()
-```
-
-- Factory creates listeners with injected configuration
-- Version-specific files pass different configs for Retail vs Classic
-- Runtime guard at the top of version-specific files prevents loading on wrong client
-
-## 9. Unit Events
+## 8. Unit Events
 
 ```lua
 frame:RegisterUnitEvent("UNIT_HEALTH", "player", "target")
 ```
 
-- More efficient than `RegisterEvent` - fires only for specified units
-- Supports up to 2 unit tokens
-- Works with `UNIT_HEALTH`, `UNIT_POWER_UPDATE`, `UNIT_AURA`, etc.
-- The unit argument is still passed as the first payload parameter
+- Fires only for the listed unit tokens — cheaper than `RegisterEvent` for unit events
+- Up to two unit tokens are supported
+- Works for `UNIT_HEALTH`, `UNIT_POWER_UPDATE`, `UNIT_AURA`, etc.
+- The unit argument is still delivered as the first payload value
 
-## 10. EventRegistry (Modern Retail)
+## 9. EventRegistry (Modern Retail)
 
 ```lua
 EventRegistry:RegisterFrameEventAndCallback("UNIT_AURA", function(_, unit, info)
@@ -254,23 +193,20 @@ EventRegistry:RegisterFrameEventAndCallback("UNIT_AURA", function(_, unit, info)
 end)
 ```
 
-- `EventRegistry` is the modern Retail event system
-- `RegisterFrameEventAndCallback` / `UnregisterFrameEventAndCallback`
-- Classic still uses the traditional frame-based approach
-- For cross-version addons, stick with traditional `RegisterEvent`
+`EventRegistry` is the modern Retail event hub, exposing `RegisterFrameEventAndCallback` / `UnregisterFrameEventAndCallback`. Classic flavors continue to use the traditional frame-based registration; cross-version addons accordingly tend to stick with `RegisterEvent`.
 
-## 11. Common Event Gotchas
+## 10. Common Event Gotchas
 
-- `UNIT_AURA` fires VERY frequently - filter the unit early and return fast
-- `COMBAT_LOG_EVENT_UNFILTERED` has no args - use `CombatLogGetCurrentEventInfo()` to get payload
-- `GET_ITEM_INFO_RECEIVED` fires when the item cache populates - use for async item lookups
-- `PLAYER_LOGOUT` is unreliable for saving data - save on important state changes instead
-- Some events fire before the frame is fully rendered - use `C_Timer.After(0, fn)` to defer to next frame
-- `VARIABLES_LOADED` is deprecated - use `ADDON_LOADED` instead
+- `UNIT_AURA` fires very frequently — handlers typically filter on the unit token early and return fast
+- `COMBAT_LOG_EVENT_UNFILTERED` carries no payload arguments; `CombatLogGetCurrentEventInfo()` returns the actual event data
+- `GET_ITEM_INFO_RECEIVED` is the async signal that an item cache entry is now populated
+- `PLAYER_LOGOUT` is unreliable for saving data; addons typically save on important state changes instead
+- Some events fire before the frame is fully rendered; `C_Timer.After(0, fn)` defers to the next frame
+- `VARIABLES_LOADED` is deprecated; `ADDON_LOADED` covers the same ground
 
-## 12. Cleanup and Unregistering
+## 11. Cleanup and Unregistering
 
-ALWAYS unregister events when a module is disabled or destroyed.
+When a module is disabled or torn down, its events are typically unregistered explicitly.
 
 Ace3 cleanup:
 
@@ -293,6 +229,4 @@ function MyFrame:Destroy()
 end
 ```
 
-- Cancel timers (AceTimer, C_Timer tickers)
-- Remove OnUpdate scripts when no longer needed (hiding a frame stops OnUpdate, but explicit cleanup is good practice for disabled modules)
-- Set script handlers to nil for clean teardown
+Cancelling timers (AceTimer, `C_Timer` tickers), removing `OnUpdate` scripts, and nilling out script handlers are the three pieces typically present in a clean teardown. Hiding a frame stops `OnUpdate` automatically, but disabled-module teardown usually clears the handler explicitly to keep the lifecycle observable.

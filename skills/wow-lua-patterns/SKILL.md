@@ -1,19 +1,19 @@
 ---
 name: wow-lua-patterns
-description: WoW-specific Lua patterns and idioms. Load when writing addon Lua code. Covers the namespace pattern, global caching, SavedVariables, metatables for OOP, mixins, version guards, string patterns, table management, coroutines, secure hooks, and slash commands.
+description: Load when explaining or reviewing addon Lua code. Catalogs idioms commonly seen in WoW addons (namespace setup, global caching, SavedVariables, metatables, secure hooks, slash commands, error handling, coroutines).
 ---
 
 # WoW Lua Patterns and Idioms
 
 ## 1. Namespace Pattern
 
-Every addon file receives the addon name and a shared private table:
+Every addon file receives the addon name and a shared private table as varargs:
 
 ```lua
 local ADDON_NAME, ns = ...
 ```
 
-Attach modules as sub-tables to share state across files without globals:
+Modules attach as sub-tables on `ns` to share state across files without touching `_G`:
 
 ```lua
 -- Config.lua
@@ -29,11 +29,11 @@ function ns.Utils.Round(value, decimals)
 end
 ```
 
-For LoadOnDemand companion addons, expose a single global bridge: `MyAddonNS = ns`. **NEVER** use raw globals for addon state.
+LoadOnDemand companion addons sometimes expose a single global bridge of the form `MyAddonNS = ns` to publish their namespace to other addons. Beyond that bridge, addon state in raw globals is rare and would leak across the shared `_G` namespace.
 
 ## 2. Global Caching
 
-Lua local lookups are faster than global table lookups. Cache at file scope:
+Lua local lookups are faster than global table lookups, so addons often cache APIs at file scope:
 
 ```lua
 local CreateFrame, GetTime = CreateFrame, GetTime
@@ -44,19 +44,18 @@ local tinsert, tremove = table.insert, table.remove
 local format, match = string.format, string.match
 ```
 
-- Cache at file scope, not inside functions - one lookup at load time
-- Always cache APIs used in `OnUpdate` or other hot paths
+Caching at file scope happens once at load time. APIs called from `OnUpdate` or other hot paths are the most common targets.
 
 ## 3. SavedVariables
 
-Declare in `.toc` - the global is created before `ADDON_LOADED` fires:
+SavedVariables are declared in the `.toc`; the matching global is created before `ADDON_LOADED` fires:
 
 ```
 ## SavedVariables: MyAddonDB
 ## SavedVariablesPerCharacter: MyAddonCharDB
 ```
 
-Initialize with defaults and handle schema migration:
+A common form is to seed defaults and migrate schema versions on load:
 
 ```lua
 local defaults = { scale = 1.0, showTooltips = true, version = 1 }
@@ -74,7 +73,7 @@ function ns:InitDB()
 end
 ```
 
-AceDB-3.0 handles defaults and profiles automatically:
+AceDB-3.0 wraps the same pattern with profile support:
 
 ```lua
 self.db = LibStub("AceDB-3.0"):New("MyAddonDB", {
@@ -84,7 +83,7 @@ self.db = LibStub("AceDB-3.0"):New("MyAddonDB", {
 
 ## 4. Metatables and OOP
 
-Prototype pattern for class-like objects:
+A prototype pattern is the typical way addons express class-like objects:
 
 ```lua
 local MyClass = {}
@@ -99,7 +98,7 @@ function MyClass:GetLabel()
 end
 ```
 
-Blizzard-style mixins for mixing behavior into frames:
+Blizzard-style mixins compose behavior into frames:
 
 ```lua
 local MyMixin = {}
@@ -111,26 +110,11 @@ Mixin(frame, MyMixin)
 frame:OnLoad()
 ```
 
-Prefer composition over deep inheritance chains.
+Composition tends to dominate over deep inheritance chains in addon code.
 
-## 5. Version Guards
+## 5. String Patterns (Not Regex)
 
-Guard entire files or individual calls by game version:
-
-```lua
--- File-level guard
-if WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE then return end
-
--- API-level guard
-local ok, result = pcall(C_MythicPlus.GetCurrentAffixes)
-if ok and result then --[[ Retail only ]] end
-```
-
-Constants: `WOW_PROJECT_MAINLINE` (Retail), `WOW_PROJECT_CLASSIC` (Era), `WOW_PROJECT_CATACLYSM_CLASSIC`, `WOW_PROJECT_ANNIVERSARY_CLASSIC`. Use packager directives (`#@retail@` / `#@end-retail@`) in `.toc` files for build-time exclusion.
-
-## 6. String Patterns (Not Regex)
-
-Lua uses patterns, not regex. Key classes: `%d` digit, `%a` letter, `%w` alphanumeric, `%s` whitespace, `%p` punctuation. Uppercase inverts: `%D` non-digit, etc.
+Lua uses patterns rather than regex. Key character classes: `%d` digit, `%a` letter, `%w` alphanumeric, `%s` whitespace, `%p` punctuation. Uppercase forms invert (`%D` = non-digit, etc.).
 
 ```lua
 local count = tonumber(match("You received 5 gold.", "(%d+)"))
@@ -144,21 +128,21 @@ local function PatternEscape(str)
 end
 ```
 
-Use `string.format` for display strings - localization-friendly and type-safe:
+Display strings typically go through `string.format` for type safety and easier localization:
 
 ```lua
 local label = format("%s: %d/%d (%.1f%%)", name, current, total, pct)
 ```
 
-## 7. Table Management
+## 6. Table Management
 
 ```lua
 wipe(myTable)                    -- clear without new allocation
 local copy = CopyTable(original) -- deep copy (Blizzard utility)
-local count = #myArray           -- array length (beware nil holes!)
+local count = #myArray           -- array length (undefined when nil holes exist)
 ```
 
-Table pooling for frequently created/destroyed objects:
+Table pooling shows up in code that creates and destroys objects frequently (event payloads, list rows, transient state):
 
 ```lua
 local pool = {}
@@ -170,27 +154,29 @@ local function ReleaseTable(t)
 end
 ```
 
-## 8. Vararg Handling
+## 7. Vararg Handling
+
+`select("#", ...)` returns the correct count even when some varargs are nil — `#{...}` would miscount in that case:
 
 ```lua
 function ns.Utils.PrintAll(...)
-    local n = select("#", ...)  -- correct count even with nil args
+    local n = select("#", ...)
     for i = 1, n do
         print(i, tostring(select(i, ...)))
     end
 end
 ```
 
-Store varargs with preserved count using `{ n = select("#", ...), ... }`:
+Storing varargs while preserving count is commonly done with the `n = select("#", ...)` packed-table form:
 
 ```lua
 local packed = { n = select("#", ...), ... }
 -- packed.n == 3 for ("a", nil, "c"), packed[2] == nil preserved
 ```
 
-## 9. Secure Hooks
+## 8. Secure Hooks
 
-Post-hooks run AFTER the original - you cannot modify arguments or prevent execution:
+Post-hooks (via `hooksecurefunc`) run after the original — they cannot modify arguments or prevent execution, but they do not introduce taint:
 
 ```lua
 hooksecurefunc("TargetFrame_Update", function(self)
@@ -202,7 +188,7 @@ hooksecurefunc(GameTooltip, "SetUnitBuff", function(self, ...)
 end)
 ```
 
-For script handlers, use `HookScript` to chain without replacing:
+For script handlers, `HookScript` chains a new handler after the existing one without replacing it:
 
 ```lua
 frame:HookScript("OnEvent", function(self, event)
@@ -210,9 +196,9 @@ frame:HookScript("OnEvent", function(self, event)
 end)
 ```
 
-**NEVER** replace secure functions directly - this causes taint and breaks protected actions in combat.
+Replacing a secure function outright (assignment over the global, or `SetScript` on a protected handler) introduces taint and breaks protected actions in combat — the post-hook variants exist to avoid that.
 
-## 10. Slash Commands
+## 9. Slash Commands
 
 ```lua
 SLASH_MYADDON1 = "/myaddon"
@@ -229,11 +215,11 @@ SlashCmdList["MYADDON"] = function(msg)
 end
 ```
 
-`SLASH_*` globals and `SavedVariables` are the **only** acceptable global variables in addon code. AceConsole-3.0 provides `self:RegisterChatCommand()` as an alternative.
+The `SLASH_*` globals and the SavedVariables tables are typically the only globals an addon defines; everything else lives on the namespace `ns`. AceConsole-3.0 offers `self:RegisterChatCommand()` as a wrapper over the same mechanism.
 
-## 11. Error Handling
+## 10. Error Handling
 
-Use `error()` with level 2 to blame the caller for public API misuse:
+`error()` with level 2 attributes the failure to the caller of a public API rather than the line that raised it:
 
 ```lua
 function ns.Config.Set(key, value)
@@ -244,7 +230,7 @@ function ns.Config.Set(key, value)
 end
 ```
 
-Wrap fallible operations and use `or` for defensive defaults:
+Handling fallible operations splits along whether the API throws or returns nil:
 
 ```lua
 -- Non-throwing APIs: check return value for nil
@@ -261,17 +247,17 @@ end
 local name = UnitName("target") or "Unknown"
 ```
 
-Never silently swallow errors - handle them explicitly or propagate upward.
+Silently swallowed errors tend to produce "addon does nothing in combat" reports — addons in good shape either log, surface, or propagate.
 
-## 12. Coroutines and Deferred Work
+## 11. Coroutines and Deferred Work
 
-Defer execution out of event handlers or loading:
+A zero-delay timer is the standard way to defer execution out of an event handler or loading frame:
 
 ```lua
 C_Timer.After(0, function() ns:InitializeUI() end)
 ```
 
-Spread heavy work across frames with a coroutine:
+Heavy work spread across frames typically uses a coroutine driven by a ticker:
 
 ```lua
 local function ProcessLargeDataset(data)
@@ -290,7 +276,7 @@ local function ProcessLargeDataset(data)
 end
 ```
 
-Use `C_Timer.NewTicker` for periodic updates that don't need frame-level precision:
+`C_Timer.NewTicker` covers periodic updates that do not need frame-level precision:
 
 ```lua
 local ticker = C_Timer.NewTicker(1.0, function() ns:UpdateStatusDisplay() end)

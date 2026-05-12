@@ -1,11 +1,11 @@
 ---
 name: wow-frame-api
-description: WoW Frame creation, widget types, anchoring, and UI patterns. Load when working on addon UI code. Covers CreateFrame, anchor system, backdrop setup, textures, font strings, animations, secure templates, custom widgets, frame pooling, and taint avoidance.
+description: Reference for understanding addon UI code. Documents the WoW frame and widget system as it appears in addon source — anchors, strata, textures, font strings, secure templates, frame pools, taint, tooltips.
 ---
 
 # WoW Frame and UI API Patterns
 
-Reference for building addon UIs. **ALWAYS** use `wow-api-lookup` to verify signatures before calling any widget method or CreateFrame variant.
+A catalog of how addons construct and manipulate the WoW UI. Signatures and exact widget methods are best confirmed via `wow-api-lookup`; this skill explains the shapes of code seen in real addons.
 
 ---
 
@@ -16,18 +16,16 @@ local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
 ```
 
 - Parameters: `frameType`, `name`, `parent`, `template`, `id`
-- Prefer `nil` names (anonymous frames) unless other addons need to reference the frame
-- Named frames register as globals - avoid polluting `_G` unnecessarily
+- Anonymous frames (`name = nil`) are common; named frames register as globals on `_G`, so a name is typically only set when other addons need to reference the frame
 - Common types: `Frame`, `Button`, `StatusBar`, `ScrollFrame`, `EditBox`, `Slider`, `CheckButton`, `GameTooltip`
-- Multiple templates via comma-separated string: `"BackdropTemplate,SecureActionButtonTemplate"`
+- Multiple templates are passed as a comma-separated string: `"BackdropTemplate,SecureActionButtonTemplate"`
 
 ## 2. Frame Hierarchy and Strata
 
-- Child inherits parent visibility, scale, alpha. Hiding a parent hides all children.
-- Reparent with `frame:SetParent(newParent)`
-- Strata (bottom to top): `BACKGROUND`, `LOW`, `MEDIUM` (default), `HIGH`, `DIALOG`, `FULLSCREEN`, `FULLSCREEN_DIALOG`, `TOOLTIP`
-- `frame:SetFrameStrata("HIGH")` - assign strata
-- `frame:SetFrameLevel(10)` - z-order within a strata
+- A child inherits its parent's visibility, scale, and alpha; hiding a parent hides every descendant
+- `frame:SetParent(newParent)` reparents
+- Strata, bottom to top: `BACKGROUND`, `LOW`, `MEDIUM` (default), `HIGH`, `DIALOG`, `FULLSCREEN`, `FULLSCREEN_DIALOG`, `TOOLTIP`
+- `frame:SetFrameStrata("HIGH")` assigns strata; `frame:SetFrameLevel(10)` controls z-order within a strata
 
 ## 3. Anchor System
 
@@ -36,10 +34,9 @@ frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 frame:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", 5, -5)
 ```
 
-- **ALWAYS** call `ClearAllPoints()` before repositioning an already-anchored frame
-- `SetPoint(point, relativeTo, relativePoint, offsetX, offsetY)`
-- Anchor to frame references, not name strings (avoids global lookup cost)
-- `SetAllPoints(parent)` - shortcut to fill the parent entirely
+- `SetPoint(point, relativeTo, relativePoint, offsetX, offsetY)` — additional `SetPoint` calls add anchors rather than replacing them, so repositioning an already-anchored frame typically pairs `ClearAllPoints()` with new `SetPoint` calls
+- Passing a frame reference as `relativeTo` avoids the global lookup that a name string would force
+- `SetAllPoints(parent)` is the shortcut for filling the parent
 
 ```lua
 -- Fill parent with padding
@@ -53,7 +50,7 @@ frame:SetPoint("TOPRIGHT", sibling, "BOTTOMRIGHT", 0, -4)
 
 ## 4. Backdrop Setup
 
-Requires `BackdropTemplate` in the CreateFrame call.
+Backdrops require the `BackdropTemplate` template, which was removed in 9.0 and re-added as an explicit opt-in:
 
 ```lua
 local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
@@ -67,8 +64,7 @@ frame:SetBackdropColor(0, 0, 0, 0.8)
 frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
 ```
 
-- `BackdropTemplate` was removed in 9.0, re-added as an explicit template - always inherit it
-- `tile = true` and `tileSize = 16` for repeating background patterns
+`tile = true` and `tileSize = 16` produce repeating backgrounds.
 
 ## 5. Textures and Layers
 
@@ -79,10 +75,10 @@ tex:SetAllPoints()
 tex:SetVertexColor(1, 1, 1, 0.5)
 ```
 
-- Draw layers (back to front): `BACKGROUND`, `BORDER`, `ARTWORK`, `OVERLAY`, `HIGHLIGHT`
-- Sub-layer offset (integer -8 to 7) for ordering within a layer
-- `HIGHLIGHT` layer auto-shows on mouse enter, hides on leave
-- Atlas textures: `tex:SetAtlas("Tooltip-Background")`
+- Draw layers, back to front: `BACKGROUND`, `BORDER`, `ARTWORK`, `OVERLAY`, `HIGHLIGHT`
+- Sub-layer offset (integer -8 to 7) orders textures within a layer
+- `HIGHLIGHT` layer auto-shows on mouse enter and hides on leave
+- Atlas: `tex:SetAtlas("Tooltip-Background")`
 - Sprite regions: `tex:SetTexCoord(left, right, top, bottom)`
 
 ```lua
@@ -99,10 +95,10 @@ text:SetText("Hello World")
 ```
 
 - Built-in templates: `GameFontNormal`, `GameFontHighlight`, `GameFontNormalLarge`, `GameFontNormalSmall`
-- Custom font: `text:SetFont("Interface/AddOns/MyAddon/Fonts/Custom.ttf", 14, "OUTLINE")`
+- Custom fonts: `text:SetFont("Interface/AddOns/MyAddon/Fonts/Custom.ttf", 14, "OUTLINE")`
 - Flags: `"OUTLINE"`, `"THICKOUTLINE"`, `"MONOCHROME"`
-- Overflow: `text:SetWordWrap(true)` and `text:SetMaxLines(3)`
-- Inline color: `"|cFFFF0000Red text|r normal text"`
+- Overflow: `text:SetWordWrap(true)`, `text:SetMaxLines(3)`
+- Inline color escape: `"|cFFFF0000Red text|r normal text"`
 
 ## 7. StatusBar Patterns
 
@@ -119,8 +115,7 @@ bg:SetTexture("Interface/TargetingFrame/UI-StatusBar")
 bg:SetVertexColor(0.2, 0.2, 0.2, 0.8)
 ```
 
-- Smooth value transitions via OnUpdate interpolation - never jump directly
-- `bar:SetFillStyle("STANDARD")` or `"REVERSE"` or `"CENTER"` for fill direction
+Smooth-transition bars typically interpolate via `OnUpdate` rather than jumping. `bar:SetFillStyle("STANDARD" | "REVERSE" | "CENTER")` controls fill direction.
 
 ## 8. Animation System
 
@@ -136,20 +131,20 @@ ag:Play()
 
 - Types: `Alpha`, `Scale`, `Translation`, `Rotation`, `Path`
 - Smoothing: `IN`, `OUT`, `IN_OUT`, `NONE`
-- Chain with `SetStartDelay` or `SetOrder` (groups play order 1, then 2, etc.)
-- Loop: `ag:SetLooping("REPEAT")` or `"BOUNCE"`
+- Sequencing: `SetStartDelay` or `SetOrder` (groups play order 1, then 2, etc.)
+- Looping: `ag:SetLooping("REPEAT" | "BOUNCE")`
 - Completion: `ag:SetScript("OnFinished", function(self) self:GetParent():Hide() end)`
 
 ```lua
 local slide = ag:CreateAnimation("Translation")
-slide:SetOffset(0, -50)  -- slide up 50px from below
+slide:SetOffset(0, -50)
 slide:SetDuration(0.25)
 slide:SetSmoothing("OUT")
 ```
 
 ## 9. Secure Templates
 
-Secure frames allow combat-time clicks (casting spells, targeting, etc.).
+Secure frames carry the protected attribute set that allows combat-time clicks (casting spells, targeting, and so on):
 
 ```lua
 local btn = CreateFrame("Button", "MySecureBtn", UIParent, "SecureActionButtonTemplate")
@@ -158,11 +153,9 @@ btn:SetAttribute("spell", "Rejuvenation")
 btn:RegisterForClicks("AnyUp", "AnyDown")
 ```
 
-- `SecureActionButtonTemplate` - action buttons (spell, item, macro)
-- `SecureHandlerBaseTemplate` - custom secure state via restricted Lua
-- **NEVER** modify secure frame attributes during combat
-- Guard: `if InCombatLockdown() then return end`
-- Use `PLAYER_REGEN_ENABLED` to apply deferred secure changes after combat
+- `SecureActionButtonTemplate` covers spell / item / macro action buttons
+- `SecureHandlerBaseTemplate` exposes the restricted-Lua state environment for custom secure logic
+- Modifying secure frame attributes during combat raises a taint error and the change is rejected; `InCombatLockdown()` is the runtime guard, and `PLAYER_REGEN_ENABLED` is the typical signal to flush deferred secure updates
 
 ## 10. ScrollFrame Patterns
 
@@ -171,12 +164,11 @@ local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTempla
 scroll:SetSize(300, 400)
 
 local content = CreateFrame("Frame", nil, scroll)
-content:SetSize(300, 800) -- must have explicit size
+content:SetSize(300, 800) -- scroll frame reads this explicitly
 scroll:SetScrollChild(content)
 ```
 
-- Content frame **must** have an explicit size - the scroll frame reads it
-- Update height when children change: `content:SetHeight(totalHeight)`
+The scroll child needs an explicit size; the scroll frame uses it to compute scroll range. Resizing the content (`content:SetHeight(totalHeight)`) is what updates the scroll bar after children change.
 
 ```lua
 scroll:SetScript("OnMouseWheel", function(self, delta)
@@ -189,7 +181,7 @@ end)
 
 ## 11. Custom Widget Factories
 
-Pattern for reusable UI components (options panels, config screens):
+A common form for reusable UI components (options panels, config rows) is a factory that returns a positioned-on-demand root frame:
 
 ```lua
 local LAYOUT = { WIDGET_HEIGHT = 26, PADDING = 8, INDENT = 16 }
@@ -207,9 +199,7 @@ local function CreateToggle(parent, config)
 end
 ```
 
-- Each factory returns the root frame - caller handles positioning
-- Config tables carry `label`, `get`, `set`, and optional `tooltip`
-- Shared constants table for consistent spacing/sizing across widgets
+The factory returns the root frame; the caller anchors it. Config tables typically carry `label`, `get`, `set`, and an optional `tooltip`. A shared layout-constants table keeps spacing consistent across widgets.
 
 ## 12. Frame Pooling
 
@@ -221,9 +211,9 @@ pool:Release(frame)
 pool:ReleaseAll()
 ```
 
-- Use for dynamic lists, grids, rows - anything with variable item count
+- Used for dynamic lists, grids, rows — anywhere item count varies
 - `Acquire()` returns a recycled frame or creates a new one
-- `Release()` hides the frame and calls its reset handler
+- `Release()` hides the frame and runs its reset handler
 
 ```lua
 local pool = CreateFramePool("Frame", parent, "BackdropTemplate", function(_, frame)
@@ -235,25 +225,27 @@ end)
 
 ## 13. Taint Avoidance
 
-Taint causes "action blocked" errors and silent UI failures in combat.
+Taint is the protection system for secure code paths. Once a value or frame is touched by addon code, the engine marks it as tainted; subsequent use of that value inside a protected execution path raises an "action blocked" error and the operation is rejected. Symptoms include silent UI failures in combat, spell casts that do not fire, and `ADDON_ACTION_BLOCKED` messages.
 
-- **NEVER** modify Blizzard UI frames directly - use hooks
-- **NEVER** set global variables that Blizzard code reads
-- **ALWAYS** guard secure operations with `InCombatLockdown()` checks
-- Use `hooksecurefunc()` to safely hook without tainting
-- Defer to next frame: `C_Timer.After(0, function() ... end)`
+Common observations:
+
+- Direct mutation of Blizzard secure frames (e.g. `PlayerFrame:SetAlpha(...)`) taints those frames; the typical workaround is to react to Blizzard behavior via `hooksecurefunc` rather than replace it.
+- Setting a global that Blizzard code later reads taints the value chain through that global.
+- Modifying secure frame attributes during combat fails — `InCombatLockdown()` returns `true` and the protected attribute write is rejected.
+- `hooksecurefunc()` is the non-tainting hook variant; replacement assignments are not.
+- `C_Timer.After(0, fn)` defers work to the next frame, which is enough to escape some taint propagation chains.
 
 ```lua
--- WRONG: directly modifying Blizzard frame
+-- Direct mutation of a secure Blizzard frame: taints PlayerFrame
 PlayerFrame:SetAlpha(0.5)
 
--- RIGHT: hook to respond to Blizzard behavior
+-- Hook variant: reacts without tainting the original
 hooksecurefunc(PlayerFrame, "Show", function(self)
     -- react safely
 end)
 ```
 
-Queue changes for out-of-combat:
+A common queue pattern flushes deferred secure work when combat ends:
 
 ```lua
 local pending = {}
@@ -285,9 +277,9 @@ end)
 frame:SetScript("OnLeave", GameTooltip_Hide)
 ```
 
-- Call `SetOwner()` before adding content - it clears the previous tooltip
+- `SetOwner()` clears the previous tooltip — content added before it is discarded
 - Anchors: `ANCHOR_RIGHT`, `ANCHOR_LEFT`, `ANCHOR_CURSOR`, `ANCHOR_NONE`, `ANCHOR_TOPLEFT`
-- `GameTooltip_Hide` is a global function, not a method - pass directly as handler
-- Item tooltips: `GameTooltip:SetHyperlink(itemLink)`
-- Spell tooltips: `GameTooltip:SetSpellByID(spellID)`
-- Double column: `AddDoubleLine(leftText, rightText, lR, lG, lB, rR, rG, rB)`
+- `GameTooltip_Hide` is a global function, not a method, so it is passed directly as a handler
+- Item tooltip: `GameTooltip:SetHyperlink(itemLink)`
+- Spell tooltip: `GameTooltip:SetSpellByID(spellID)`
+- Two-column row: `AddDoubleLine(leftText, rightText, lR, lG, lB, rR, rG, rB)`
