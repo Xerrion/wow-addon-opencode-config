@@ -167,16 +167,24 @@ foreach ($file in $commandFiles) {
     Install-ConfigItem -Source $file.FullName -Target $targetPath -Label $file.Name
 }
 
-# -- Tools (individual .ts files) -------------------------------------------
+# -- Tools (.ts files, recursively, preserving subdirectory structure) ------
+# Skips __tests__/ directories and *.test.ts files - those are dev-only.
 
 Write-Host ""
 Write-Host "Tools:"
 $toolsSourceDir = Join-Path $ScriptDir "tools"
 Assert-SourceDir -Path $toolsSourceDir -Label "tools"
-$toolFiles = Get-ChildItem -Path $toolsSourceDir -Filter "*.ts" -File
+$toolFiles = Get-ChildItem -Path $toolsSourceDir -Filter "*.ts" -File -Recurse |
+    Where-Object { $_.FullName -notmatch '[\\/]__tests__[\\/]' -and $_.Name -notlike '*.test.ts' } |
+    Sort-Object FullName
 foreach ($file in $toolFiles) {
-    $targetPath = Join-Path $ToolsDir $file.Name
-    Install-ConfigItem -Source $file.FullName -Target $targetPath -Label $file.Name
+    $rel = $file.FullName.Substring($toolsSourceDir.Length).TrimStart('\', '/')
+    $targetPath = Join-Path $ToolsDir $rel
+    $targetDir = Split-Path $targetPath -Parent
+    if (-not (Test-Path $targetDir)) {
+        New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
+    }
+    Install-ConfigItem -Source $file.FullName -Target $targetPath -Label $rel
 }
 
 # -- Summary ----------------------------------------------------------------

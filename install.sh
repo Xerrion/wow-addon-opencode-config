@@ -141,14 +141,19 @@ for file in "${SCRIPT_DIR}/commands/"*.md; do
     install_item "$file" "${COMMANDS_DIR}/${name}" "$name"
 done
 
-# -- Tools (individual .ts files) -------------------------------------------
+# -- Tools (.ts files, recursively, preserving subdirectory structure) ------
+# Skips __tests__/ directories and *.test.ts files - those are dev-only.
 
 echo ""
 echo "Tools:"
-for file in "${SCRIPT_DIR}/tools/"*.ts; do
-    name="$(basename "$file")"
-    install_item "$file" "${TOOLS_DIR}/${name}" "$name"
-done
+while IFS= read -r file; do
+    rel="${file#${SCRIPT_DIR}/tools/}"
+    target="${TOOLS_DIR}/${rel}"
+    target_dir="$(dirname "$target")"
+    [ -d "$target_dir" ] || mkdir -p "$target_dir"
+    install_item "$file" "$target" "$rel"
+done < <(find "${SCRIPT_DIR}/tools" -type f -name "*.ts" \
+    -not -path "*/__tests__/*" -not -name "*.test.ts" | sort)
 
 # -- Summary ----------------------------------------------------------------
 

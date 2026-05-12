@@ -17,6 +17,7 @@ RESET=$'\033[0m'
 
 # -- Resolve paths ----------------------------------------------------------
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_DIR="${HOME}/.config/opencode"
 
 # -- Parse flags ------------------------------------------------------------
@@ -47,7 +48,7 @@ fi
 # -- Confirmation prompt ----------------------------------------------------
 
 if [ "$AUTO_YES" = false ]; then
-    printf "This will remove 12 WoW addon config items from ~/.config/opencode/. Continue? [y/N] "
+    printf "This will remove WoW addon config items from ~/.config/opencode/. Continue? [y/N] "
     read -r answer
     case "$answer" in
         [yY]|[yY][eE][sS]) ;;
@@ -89,7 +90,7 @@ done
 
 echo ""
 echo "Skills:"
-for name in wow-addon-dev wow-lua-patterns wow-frame-api wow-event-handling; do
+for name in wow-addon-toolkit wow-lua-patterns wow-frame-api wow-event-handling; do
     remove_item "skills" "$name" "dir"
     remove_item "skill" "$name" "dir"
 done
@@ -104,13 +105,33 @@ for name in wow-review wow-scaffold; do
 done
 
 # -- Tools ------------------------------------------------------------------
+# Mirror-mode: enumerate the .ts files this repo would install, and remove
+# their counterparts at the destination. Then prune now-empty subdirs (e.g.
+# data/, savedvars/) but leave the tools/ root and any unknown files alone.
 
 echo ""
 echo "Tools:"
-for name in wow-api-lookup.ts wow-wiki-fetch.ts wow-event-info.ts wow-blizzard-source.ts wow-addon-lint.ts; do
-    remove_item "tools" "$name" "file"
-    remove_item "tool" "$name" "file"
-done
+if [ -d "${SCRIPT_DIR}/tools" ]; then
+    while IFS= read -r file; do
+        rel="${file#${SCRIPT_DIR}/tools/}"
+        remove_item "tools" "$rel" "file"
+        remove_item "tool" "$rel" "file"
+    done < <(find "${SCRIPT_DIR}/tools" -type f -name "*.ts" \
+        -not -path "*/__tests__/*" -not -name "*.test.ts" | sort)
+
+    # Prune empty subdirectories under tools/ (rmdir refuses non-empty dirs,
+    # which is exactly the safety we want).
+    for subdir in tools tool; do
+        [ -d "${CONFIG_DIR}/${subdir}" ] || continue
+        for d in "${CONFIG_DIR}/${subdir}"/*/; do
+            [ -d "$d" ] || continue
+            if rmdir "$d" 2>/dev/null; then
+                printf '%s\n' "${GREEN}✓${RESET} Removed empty ${subdir}/$(basename "$d")/"
+                REMOVED=$((REMOVED + 1))
+            fi
+        done
+    done
+fi
 
 # -- Summary ----------------------------------------------------------------
 

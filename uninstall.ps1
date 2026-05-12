@@ -34,7 +34,7 @@ if (-not (Test-Path $ConfigDir)) {
 # -- Confirmation prompt ----------------------------------------------------
 
 if (-not $Yes) {
-    $answer = Read-Host "This will remove 12 WoW addon config items from ~/.config/opencode/. Continue? [y/N]"
+    $answer = Read-Host "This will remove WoW addon config items from ~/.config/opencode/. Continue? [y/N]"
     if ($answer -notmatch '^[yY]') {
         Write-Host "Aborted."
         exit 0
@@ -76,7 +76,7 @@ foreach ($name in @("wow-addon.md")) {
 
 Write-Host ""
 Write-Host "Skills:"
-foreach ($name in @("wow-addon-dev", "wow-lua-patterns", "wow-frame-api", "wow-event-handling")) {
+foreach ($name in @("wow-addon-toolkit", "wow-lua-patterns", "wow-frame-api", "wow-event-handling")) {
     Remove-ConfigItem -Subdir "skills" -Name $name -Recurse
     Remove-ConfigItem -Subdir "skill" -Name $name -Recurse
 }
@@ -91,12 +91,35 @@ foreach ($name in @("wow-review", "wow-scaffold")) {
 }
 
 # -- Tools ------------------------------------------------------------------
+# Mirror-mode: enumerate the .ts files this repo would install, and remove
+# their counterparts at the destination. Then prune now-empty subdirs (e.g.
+# data/, savedvars/) but leave the tools/ root and any unknown files alone.
 
 Write-Host ""
 Write-Host "Tools:"
-foreach ($name in @("wow-api-lookup.ts", "wow-wiki-fetch.ts", "wow-event-info.ts", "wow-blizzard-source.ts", "wow-addon-lint.ts")) {
-    Remove-ConfigItem -Subdir "tools" -Name $name
-    Remove-ConfigItem -Subdir "tool" -Name $name
+$toolsSourceDir = Join-Path $PSScriptRoot "tools"
+if (Test-Path $toolsSourceDir) {
+    $toolFiles = Get-ChildItem -Path $toolsSourceDir -Filter "*.ts" -File -Recurse |
+        Where-Object { $_.FullName -notmatch '[\\/]__tests__[\\/]' -and $_.Name -notlike '*.test.ts' } |
+        Sort-Object FullName
+    foreach ($file in $toolFiles) {
+        $rel = $file.FullName.Substring($toolsSourceDir.Length).TrimStart('\', '/')
+        Remove-ConfigItem -Subdir "tools" -Name $rel
+        Remove-ConfigItem -Subdir "tool" -Name $rel
+    }
+
+    # Prune now-empty subdirectories under tools/ (leave non-empty ones alone).
+    foreach ($subdirName in @("tools", "tool")) {
+        $subdir = Join-Path $ConfigDir $subdirName
+        if (-not (Test-Path $subdir)) { continue }
+        Get-ChildItem -Path $subdir -Directory | ForEach-Object {
+            if (-not (Get-ChildItem -Path $_.FullName -Force)) {
+                Remove-Item $_.FullName -Force
+                Write-Host "  Removed empty: $subdirName/$($_.Name)/" -ForegroundColor Green
+                $script:Removed++
+            }
+        }
+    }
 }
 
 # -- Summary ----------------------------------------------------------------
