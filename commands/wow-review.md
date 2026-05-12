@@ -15,24 +15,13 @@ Run a comprehensive code review on the specified file or directory.
 
 ### Step 1: Load Skills
 
-Load the `wow-addon-dev` skill (always required for tool reference).
+Load the `wow-addon-toolkit` skill (always required for tool reference).
 
 If the code involves UI/frames, also load `wow-frame-api`.
 If the code involves events/listeners, also load `wow-event-handling`.
 If the code involves Lua patterns (OOP, hooks, SavedVars), also load `wow-lua-patterns`.
 
-### Step 2: Run Static Analysis
-
-Run `wow-addon-lint` on the target with all categories enabled:
-- `globals` - global variable pollution
-- `taint` - combat taint risks
-- `nil-safety` - missing nil checks
-- `hardcoded-ids` - magic numbers without constants
-- `events` - event hygiene issues
-- `performance` - tight-loop problems
-- `deprecated` - removed/deprecated API usage
-
-### Step 3: Verify API Signatures (in parallel with Step 4)
+### Step 2: Verify API Signatures (in parallel with Step 3)
 
 Scan the code for WoW API calls. For each unique API call found:
 1. Use `wow-api-lookup` to verify the function signature
@@ -45,7 +34,7 @@ Focus on:
 - Global WoW API functions (Get*, Set*, Create*, Is*, Has*)
 - Widget method calls
 
-### Step 4: Check Event Patterns (in parallel with Step 3)
+### Step 3: Check Event Patterns (in parallel with Step 2)
 
 Scan for event-related code:
 1. Find all `RegisterEvent`, `RegisterUnitEvent`, or AceEvent registration calls
@@ -55,7 +44,7 @@ Scan for event-related code:
 5. Check for proper ADDON_LOADED guard (checking addon name)
 6. Flag `InCombatLockdown()` guards on secure frame operations
 
-### Step 5: Check Code Patterns
+### Step 4: Check Code Patterns
 
 Review against WoW Lua best practices:
 - Namespace pattern: does the file use `local ADDON_NAME, ns = ...`?
@@ -65,7 +54,7 @@ Review against WoW Lua best practices:
 - Early returns to reduce nesting
 - Proper error handling (not silently swallowing errors)
 
-### Step 6: Produce Review Report
+### Step 5: Produce Review Report
 
 Format the review as a structured report with severity levels:
 
@@ -75,8 +64,7 @@ Format the review as a structured report with severity levels:
 - **Info** - Style suggestions, minor improvements
 
 Group findings by category:
-1. **Lint Results** - from wow-addon-lint
-2. **API Misuse** - wrong signatures, missing params, wrong return handling
-3. **Event Issues** - bad event names, missing unregister, wrong payloads
-4. **Pattern Violations** - coding convention issues
-5. **Summary** - overall assessment with actionable next steps
+1. **API Misuse** - wrong signatures, missing params, wrong return handling
+2. **Event Issues** - bad event names, missing unregister, wrong payloads
+3. **Pattern Violations** - coding convention issues
+4. **Summary** - overall assessment with actionable next steps

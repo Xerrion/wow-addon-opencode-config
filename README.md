@@ -7,7 +7,7 @@ Agent, skills, commands, and custom tools for World of Warcraft addon developmen
 | Type | Name | Description |
 | --- | --- | --- |
 | **Agent** | `wow-addon` | WoW addon research subagent - API lookups, event payloads, Blizzard source patterns, best-practice guidance |
-| **Skill** | `wow-addon-dev` | Core tool reference - all 5 custom tools documented with usage examples |
+| **Skill** | `wow-addon-toolkit` | Core tool reference - all 5 custom tools documented with usage examples |
 | **Skill** | `wow-lua-patterns` | WoW Lua idioms - namespace pattern, global caching, metatables, hooks, SavedVariables |
 | **Skill** | `wow-frame-api` | Frame/UI API - CreateFrame, anchoring, backdrops, animations, widgets, taint avoidance |
 | **Skill** | `wow-event-handling` | Event system - registration, dispatch, AceEvent, combat lockdown, listener factories |
@@ -16,9 +16,8 @@ Agent, skills, commands, and custom tools for World of Warcraft addon developmen
 | **Script** | `maintain-annotations` | Manage multi-flavor FrameXML annotations (Retail, Classic, Classic Era, Anniversary) |
 | **Tool** | `wow-api-lookup` | Search LuaLS annotations for API signatures, widget methods, enums |
 | **Tool** | `wow-wiki-fetch` | Fetch behavioral docs from warcraft.wiki.gg |
-| **Tool** | `wow-event-info` | Look up event names and payloads (1,727 events) |
+| **Tool** | `wow-event-info` | Look up event names and payloads (all FrameXML events) |
 | **Tool** | `wow-blizzard-source` | Browse Blizzard FrameXML source code (supports per-flavor queries) |
-| **Tool** | `wow-addon-lint` | Static analysis for WoW Lua anti-patterns (7 categories) |
 
 ## Prerequisites
 
@@ -124,7 +123,7 @@ Use the `maintain-annotations` script to update or set up individual flavors:
 
 ### Querying Specific Flavors
 
-The `wow-blizzard-source` tool accepts a `version` parameter to query FrameXML for a specific flavor. When no version is specified, it defaults to Retail (`live`).
+The `wow-blizzard-source` tool accepts a `flavor` parameter to query FrameXML for a specific flavor. When no flavor is specified, it defaults to Retail (`live`).
 
 ### Manual Setup (Legacy)
 
@@ -141,7 +140,7 @@ git submodule update --init --recursive
 
 ### What the Annotations Include
 
-- **324 API files** - one per C_ namespace (C_Item, C_LootHistory, etc.)
+- **API files** - one annotation file per C_ namespace (C_Item, C_LootHistory, etc.)
 - **Widget types** - Frame, Button, StatusBar, Texture, Font, Animation
 - **Enums and types** - Enum.ItemQuality, structures, mixins
 - **Library stubs** - Ace3, LibSharedMedia, LibDataBroker, LibDBIcon, LibStub
