@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "software-engineer": {
+      "tools": {
+        "*": true
+      }
+    }
+  }
+}

@@ -67,27 +67,42 @@ function Remove-ConfigItem {
 # -- Agents -----------------------------------------------------------------
 
 Write-Host "Agents:"
-foreach ($name in @("wow-addon.md")) {
-    Remove-ConfigItem -Subdir "agents" -Name $name
-    Remove-ConfigItem -Subdir "agent" -Name $name
+$agentsSourceDir = Join-Path $PSScriptRoot "agents"
+if (Test-Path $agentsSourceDir) {
+    $agentFiles = Get-ChildItem -Path $agentsSourceDir -Filter "*.md" -File |
+        Sort-Object Name
+    foreach ($file in $agentFiles) {
+        Remove-ConfigItem -Subdir "agents" -Name $file.Name
+        Remove-ConfigItem -Subdir "agent" -Name $file.Name
+    }
 }
 
 # -- Skills -----------------------------------------------------------------
 
 Write-Host ""
 Write-Host "Skills:"
-foreach ($name in @("wow-addon-toolkit", "wow-lua-patterns", "wow-frame-api", "wow-event-handling")) {
-    Remove-ConfigItem -Subdir "skills" -Name $name -Recurse
-    Remove-ConfigItem -Subdir "skill" -Name $name -Recurse
+$skillsSourceDir = Join-Path $PSScriptRoot "skills"
+if (Test-Path $skillsSourceDir) {
+    $skillDirs = Get-ChildItem -Path $skillsSourceDir -Directory |
+        Sort-Object Name
+    foreach ($dir in $skillDirs) {
+        Remove-ConfigItem -Subdir "skills" -Name $dir.Name -Recurse
+        Remove-ConfigItem -Subdir "skill" -Name $dir.Name -Recurse
+    }
 }
 
 # -- Commands ---------------------------------------------------------------
 
 Write-Host ""
 Write-Host "Commands:"
-foreach ($name in @("wow-review", "wow-scaffold")) {
-    Remove-ConfigItem -Subdir "commands" -Name "$name.md"
-    Remove-ConfigItem -Subdir "command" -Name "$name.md"
+$commandsSourceDir = Join-Path $PSScriptRoot "commands"
+if (Test-Path $commandsSourceDir) {
+    $commandFiles = Get-ChildItem -Path $commandsSourceDir -Filter "*.md" -File |
+        Sort-Object Name
+    foreach ($file in $commandFiles) {
+        Remove-ConfigItem -Subdir "commands" -Name $file.Name
+        Remove-ConfigItem -Subdir "command" -Name $file.Name
+    }
 }
 
 # -- Tools ------------------------------------------------------------------

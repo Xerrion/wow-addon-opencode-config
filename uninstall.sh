@@ -81,28 +81,37 @@ remove_item() {
 # -- Agents -----------------------------------------------------------------
 
 echo "Agents:"
-for name in wow-addon.md; do
-    remove_item "agents" "$name" "file"
-    remove_item "agent" "$name" "file"
-done
+if [ -d "${SCRIPT_DIR}/agents" ]; then
+    while IFS= read -r file; do
+        name="$(basename "$file")"
+        remove_item "agents" "$name" "file"
+        remove_item "agent" "$name" "file"
+    done < <(find "${SCRIPT_DIR}/agents" -maxdepth 1 -type f -name "*.md" | sort)
+fi
 
 # -- Skills -----------------------------------------------------------------
 
 echo ""
 echo "Skills:"
-for name in wow-addon-toolkit wow-lua-patterns wow-frame-api wow-event-handling; do
-    remove_item "skills" "$name" "dir"
-    remove_item "skill" "$name" "dir"
-done
+if [ -d "${SCRIPT_DIR}/skills" ]; then
+    while IFS= read -r dir; do
+        name="$(basename "$dir")"
+        remove_item "skills" "$name" "dir"
+        remove_item "skill" "$name" "dir"
+    done < <(find "${SCRIPT_DIR}/skills" -mindepth 1 -maxdepth 1 -type d | sort)
+fi
 
 # -- Commands ---------------------------------------------------------------
 
 echo ""
 echo "Commands:"
-for name in wow-review wow-scaffold; do
-    remove_item "commands" "${name}.md" "file"
-    remove_item "command" "${name}.md" "file"
-done
+if [ -d "${SCRIPT_DIR}/commands" ]; then
+    while IFS= read -r file; do
+        name="$(basename "$file")"
+        remove_item "commands" "$name" "file"
+        remove_item "command" "$name" "file"
+    done < <(find "${SCRIPT_DIR}/commands" -maxdepth 1 -type f -name "*.md" | sort)
+fi
 
 # -- Tools ------------------------------------------------------------------
 # Mirror-mode: enumerate the .ts files this repo would install, and remove
