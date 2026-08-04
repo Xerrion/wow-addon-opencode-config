@@ -25,6 +25,9 @@ RESET=$'\033[0m'
 
 KETHO_REPO="https://github.com/Ketho/vscode-wow-api"
 FRAMEXML_REPO="https://github.com/NumyAddon/FramexmlAnnotations.git"
+# Unix annotation storage deliberately stays at ~/.local/share (XDG-style),
+# matching install.sh and the tools' defaultDataRoot(). The PowerShell
+# scripts use %LOCALAPPDATA% on Windows.
 ANNOTATIONS_DIR="${HOME}/.local/share/wow-annotations"
 FRAMEXML_DIR="${HOME}/.local/share/wow-framexml"
 BARE_DIR="${FRAMEXML_DIR}/.bare"

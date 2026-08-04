@@ -1,9 +1,10 @@
 # ---------------------------------------------------------------------------
 # maintain-annotations.ps1 - Clone/update multi-flavor WoW annotation repos
 #
-# Manages two annotation sources:
-#   1. Ketho's vscode-wow-api   -> ~/.local/share/wow-annotations/
-#   2. NumyAddon FrameXML       -> ~/.local/share/wow-framexml/ (bare + worktrees)
+# Manages two annotation sources under the platform data root
+# (%LOCALAPPDATA% on Windows, ~/.local/share elsewhere):
+#   1. Ketho's vscode-wow-api   -> <data root>/wow-annotations/
+#   2. NumyAddon FrameXML       -> <data root>/wow-framexml/ (bare + worktrees)
 #
 # Usage:
 #   .\maintain-annotations.ps1                        # Update all flavors
@@ -29,8 +30,20 @@ $ErrorActionPreference = "Stop"
 
 $KethoRepo = "https://github.com/Ketho/vscode-wow-api"
 $FrameXMLRepo = "https://github.com/NumyAddon/FramexmlAnnotations.git"
-$AnnotationsDir = Join-Path $env:USERPROFILE (Join-Path ".local" (Join-Path "share" "wow-annotations"))
-$FrameXMLDir = Join-Path $env:USERPROFILE (Join-Path ".local" (Join-Path "share" "wow-framexml"))
+
+# Platform-native annotation storage. Windows uses the non-roaming user data
+# convention (%LOCALAPPDATA%); macOS/Linux (pwsh) keep the ~/.local/share
+# convention shared with maintain-annotations.sh and the TS tools' defaults.
+# PowerShell 5.1 only runs on Windows; $IsWindows exists from 6+ (the -lt 6
+# check must come first so 5.1 never evaluates the undefined variable).
+$IsWindowsHost = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
+$DataHome = if ($IsWindowsHost) {
+    if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE "AppData\Local" }
+} else {
+    Join-Path $HOME ".local/share"
+}
+$AnnotationsDir = Join-Path $DataHome "wow-annotations"
+$FrameXMLDir = Join-Path $DataHome "wow-framexml"
 $BareDir = Join-Path $FrameXMLDir ".bare"
 
 $FlavorBranches = @{

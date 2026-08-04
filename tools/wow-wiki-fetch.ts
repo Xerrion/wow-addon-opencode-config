@@ -35,7 +35,10 @@ const MAX_INPUT_LEN = 300;
 const USER_AGENT =
   "wow-wiki-fetch/1.0 (opencode tool; +https://warcraft.wiki.gg/)";
 const BASE = "https://warcraft.wiki.gg/wiki/";
-const WIKI_HOST = "warcraft.wiki.gg";
+const WIKI_ORIGIN = "https://warcraft.wiki.gg";
+const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_RESPONSE_BYTES = 2_000_000;
+const MAX_REDIRECTS = 5;
 
 // --- Generic helpers ------------------------------------------------------
 
@@ -82,6 +85,30 @@ function stripTags(s: string): string {
 /** Decode entities, strip tags, collapse whitespace runs. Inline text only. */
 function clean(s: string): string {
   return decodeEntities(stripTags(s)).replace(/[ \t\r\n]+/g, " ").trim();
+}
+
+function markdownLink(href: string, body: string): string {
+  const label = clean(body).replace(/([\\[\]])/g, "\\$1");
+  if (label.length === 0) return "";
+  let url: URL;
+  try {
+    url = new URL(decodeEntities(href), WIKI_ORIGIN);
+  } catch {
+    return label;
+  }
+  if (url.origin !== WIKI_ORIGIN || !url.pathname.startsWith("/wiki/")) {
+    return label;
+  }
+  const target = url.origin === WIKI_ORIGIN ? `${url.pathname}${url.search}${url.hash}` : url.href;
+  return `[${label}](${target.replace(/[()]/g, (char) => `\\${char}`)})`;
+}
+
+function cleanInline(s: string): string {
+  const linked = s.replace(
+    /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    (_, href: string, body: string) => markdownLink(href, body),
+  );
+  return clean(linked);
 }
 
 // --- HTML extraction ------------------------------------------------------
@@ -185,11 +212,43 @@ function sliceContentText(html: string): string | null {
 }
 
 /** Strip chrome bits inside the content slice that would noise up the body. */
-function stripChrome(html: string): string {
+function stripBalancedElements(html: string, openingPattern: RegExp): string {
+  let output = "";
+  let cursor = 0;
+  openingPattern.lastIndex = 0;
+  let opening: RegExpExecArray | null;
+  while ((opening = openingPattern.exec(html)) !== null) {
+    const tag = opening[1]!;
+    const tagPattern = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+    tagPattern.lastIndex = opening.index + opening[0].length;
+    let depth = 1;
+    let closingEnd = -1;
+    let tagMatch: RegExpExecArray | null;
+    while ((tagMatch = tagPattern.exec(html)) !== null) {
+      if (/^<\//.test(tagMatch[0])) depth--;
+      else if (!/\/>$/.test(tagMatch[0])) depth++;
+      if (depth === 0) {
+        closingEnd = tagPattern.lastIndex;
+        break;
+      }
+    }
+    if (closingEnd === -1) continue;
+    output += html.slice(cursor, opening.index);
+    cursor = closingEnd;
+    openingPattern.lastIndex = closingEnd;
+  }
+  return output + html.slice(cursor);
+}
+
+export function stripChrome(html: string): string {
   // catlinks (collected separately)
-  html = html.replace(
-    /<div\b[^>]*id\s*=\s*["']catlinks["'][\s\S]*?<\/div>\s*(?:<\/div>\s*)?/i,
-    "",
+  html = stripBalancedElements(
+    html,
+    /<(div)\b[^>]*id\s*=\s*["']catlinks["'][^>]*>/gi,
+  );
+  html = stripBalancedElements(
+    html,
+    /<(nav|div|table|ul)\b[^>]*(?:id\s*=\s*["'](?:toc|mw-navigation)["']|class\s*=\s*["'][^"']*(?:navbox|vertical-navbox|toc|mw-navigation|printfooter)[^"']*["'])[^>]*>/gi,
   );
   // edit-section "[edit]" spans on every heading
   html = html.replace(
@@ -215,7 +274,7 @@ function renderTable(body: string): string {
     const cellRe = /<(t[hd])\b[^>]*>([\s\S]*?)<\/\1>/gi;
     let c: RegExpExecArray | null;
     while ((c = cellRe.exec(tr[1]!)) !== null) {
-      cells.push(clean(c[2]!).replace(/\|/g, "\\|"));
+      cells.push(cleanInline(c[2]!).replace(/\|/g, "\\|"));
     }
     if (cells.length > 0) rows.push(cells);
   }
@@ -238,7 +297,7 @@ function renderDl(body: string): string {
   let m: RegExpExecArray | null;
   while ((m = re.exec(body)) !== null) {
     const tag = m[1]!.toLowerCase();
-    const text = clean(m[2]!);
+    const text = cleanInline(m[2]!);
     if (text.length === 0) continue;
     if (tag === "dt") parts.push(`**${text}**`);
     else parts.push(`: ${text}`);
@@ -251,7 +310,7 @@ function renderList(body: string, marker: string): string {
   const items: string[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(body)) !== null) {
-    const text = clean(m[1]!);
+    const text = cleanInline(m[1]!);
     if (text.length > 0) items.push(`${marker} ${text}`);
   }
   return items.length > 0 ? `\n${items.join("\n")}\n\n` : "";
@@ -262,7 +321,7 @@ function renderList(body: string, marker: string): string {
  * `<pre>` first so its content is decoded and fenced before subsequent
  * passes touch it, then block-level elements top-down.
  */
-function renderHtml(html: string): string {
+export function renderHtml(html: string): string {
   let s = html;
 
   // Pre blocks first: detect lang, decode entities, wrap with safe fence.
@@ -306,7 +365,7 @@ function renderHtml(html: string): string {
     (_, body: string) => renderList(body, "1."),
   );
   s = s.replace(/<p\b[^>]*>([\s\S]*?)<\/p>/gi, (_, body: string) => {
-    const t = clean(body);
+    const t = cleanInline(body);
     return t.length > 0 ? `\n\n${t}\n\n` : "";
   });
   s = s.replace(/<br\s*\/?>/gi, "\n");
@@ -368,6 +427,185 @@ function normaliseInput(raw: string): string {
   const trimmed = raw.trim();
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return trimmed.replace(/\s+/g, "_");
+}
+
+function parseAllowedUrl(value: string, context: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`wow-wiki-fetch: invalid ${context} URL: ${value}`);
+  }
+  if (
+    url.origin !== WIKI_ORIGIN ||
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    throw new Error(
+      `wow-wiki-fetch: ${context} URL must use ${WIKI_ORIGIN} (got ${url.origin})`,
+    );
+  }
+  return url;
+}
+
+export async function fetchWithRedirects(
+  requestedUrl: string,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<{
+  response: Response;
+  finalUrl: string;
+  redirectSource: string | undefined;
+}> {
+  let currentUrl = requestedUrl;
+  let redirectSource: string | undefined;
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(currentUrl, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "text/html,application/xhtml+xml",
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (controller.signal.aborted) {
+        throw new Error(`wow-wiki-fetch: request timed out after ${timeoutMs} ms for ${currentUrl}`);
+      }
+      throw new Error(`wow-wiki-fetch: network error for ${currentUrl}: ${message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      const responseUrl = response.url || currentUrl;
+      try {
+        parseAllowedUrl(responseUrl, "response");
+      } catch (error) {
+        await response.body?.cancel(error);
+        throw error;
+      }
+      return {
+        response,
+        finalUrl: responseUrl,
+        redirectSource,
+      };
+    }
+
+    await response.body?.cancel();
+    if (redirects === MAX_REDIRECTS) {
+      throw new Error(`wow-wiki-fetch: too many redirects (maximum ${MAX_REDIRECTS})`);
+    }
+    const location = response.headers.get("location");
+    if (!location) {
+      throw new Error(`wow-wiki-fetch: HTTP ${response.status} redirect missing Location header`);
+    }
+    if (!redirectSource) redirectSource = currentUrl;
+    currentUrl = parseAllowedUrl(new URL(location, currentUrl).href, "redirect").href;
+  }
+  throw new Error("wow-wiki-fetch: redirect handling failed");
+}
+
+export async function readBoundedBody(
+  response: Response,
+  maxBytes = MAX_RESPONSE_BYTES,
+): Promise<string> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  const isDeclaredOversized =
+    Number.isFinite(declaredLength) && declaredLength > maxBytes;
+  if (!response.body) {
+    if (isDeclaredOversized) {
+      throw new Error(
+        `wow-wiki-fetch: response body exceeds ${maxBytes} bytes`,
+      );
+    }
+    return "";
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const deadline = Date.now() + REQUEST_TIMEOUT_MS;
+  try {
+    if (isDeclaredOversized) {
+      throw new Error(
+        `wow-wiki-fetch: response body exceeds ${maxBytes} bytes`,
+      );
+    }
+    while (true) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        throw new Error(
+          `wow-wiki-fetch: response body timed out after ${REQUEST_TIMEOUT_MS} ms`,
+        );
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `wow-wiki-fetch: response body timed out after ${REQUEST_TIMEOUT_MS} ms`,
+              ),
+            ),
+          remainingMs,
+        );
+      });
+      const { done, value } = await Promise.race([reader.read(), timeout]).finally(
+        () => {
+          if (timer) clearTimeout(timer);
+        },
+      );
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw new Error(
+          `wow-wiki-fetch: response body exceeds ${maxBytes} bytes`,
+        );
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    try {
+      await reader.cancel(error);
+    } catch (cancelError) {
+      const readMessage = error instanceof Error ? error.message : String(error);
+      const cancelMessage =
+        cancelError instanceof Error ? cancelError.message : String(cancelError);
+      throw new Error(
+        `wow-wiki-fetch: failed reading response body: ${readMessage}; failed cancelling response body: ${cancelMessage}`,
+      );
+    }
+    if (error instanceof Error && error.message.startsWith("wow-wiki-fetch:")) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`wow-wiki-fetch: failed reading response body: ${message}`);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`wow-wiki-fetch: response body is not valid UTF-8: ${message}`);
+  }
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= maxBytes) return value;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
+  return bytes.subarray(0, end).toString("utf8");
 }
 
 function renderNoMatch(
@@ -437,7 +675,7 @@ function renderArticle(opts: {
 
   if (!truncated && Buffer.byteLength(body, "utf8") > BUDGET) {
     truncated = true;
-    body = body.slice(0, BUDGET - reserveBytes);
+    body = truncateUtf8(body, BUDGET - reserveBytes);
   }
 
   if (truncated) {
@@ -470,56 +708,19 @@ export default tool({
     const slug = normaliseInput(page);
     const requestedUrl = buildUrl(slug);
 
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(requestedUrl);
-    } catch {
-      throw new Error(`wow-wiki-fetch: invalid URL: ${requestedUrl}`);
-    }
-    if (parsedUrl.host !== WIKI_HOST) {
-      throw new Error(
-        `wow-wiki-fetch: host must be ${WIKI_HOST} (got ${parsedUrl.host})`,
-      );
-    }
+    parseAllowedUrl(requestedUrl, "request");
 
-    let res: Response;
-    try {
-      res = await fetch(requestedUrl, {
-        redirect: "follow",
-        headers: {
-          "User-Agent": USER_AGENT,
-          Accept: "text/html,application/xhtml+xml",
-        },
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`wow-wiki-fetch: network error: ${msg}`);
-    }
-
-    const finalUrl = res.url || requestedUrl;
-    let html: string;
-    try {
-      html = await res.text();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`wow-wiki-fetch: failed reading response body: ${msg}`);
-    }
+    const { response: res, finalUrl, redirectSource } =
+      await fetchWithRedirects(requestedUrl);
+    const html = await readBoundedBody(res);
 
     // 404 / noarticletext → structured no-match body (NOT a throw, NOT a
     // pretend-success). Anti-regression #4.
     if (res.status === 404 || isNoArticle(html)) {
-      const wgRedir = extractRedirectedFromSlug(html);
-      const redirectedFrom =
-        finalUrl !== requestedUrl
-          ? requestedUrl
-          : wgRedir
-            ? page
-            : undefined;
       return {
-        output: renderNoMatch(page, requestedUrl, redirectedFrom),
+        output: renderNoMatch(page, requestedUrl, undefined),
         metadata: {
           url: requestedUrl,
-          ...(redirectedFrom ? { redirectedFrom } : {}),
           categories: [] as string[],
         },
       };
@@ -534,8 +735,11 @@ export default tool({
     // the redirect target inline without a 30x, so the HTTP signal alone is
     // not sufficient.
     const wgRedir = extractRedirectedFromSlug(html);
-    const redirectedFrom =
-      finalUrl !== requestedUrl ? requestedUrl : wgRedir ? page : undefined;
+    const redirectedFrom = redirectSource
+      ? redirectSource
+      : wgRedir
+        ? wgRedir
+        : undefined;
 
     const title = extractTitle(html);
     const categories = extractCategories(html);

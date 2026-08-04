@@ -22,6 +22,10 @@ RESET=$'\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_DIR="${HOME}/.config/opencode"
 
+# Platform-native annotation storage - must match maintain-annotations.sh.
+ANNOTATIONS_DIR="${HOME}/.local/share/wow-annotations"
+FRAMEXML_DIR="${HOME}/.local/share/wow-framexml"
+
 # -- State ------------------------------------------------------------------
 
 FORCE=false
@@ -155,6 +159,60 @@ while IFS= read -r file; do
 done < <(find "${SCRIPT_DIR}/tools" -type f -name "*.ts" \
     -not -path "*/__tests__/*" -not -name "*.test.ts" | sort)
 
+# -- Tool dependencies ------------------------------------------------------
+# Tools under tools/ import 'zod' and '@opencode-ai/plugin/tool'. Declare them
+# in ~/.config/opencode/package.json so OpenCode can resolve them at runtime.
+
+echo ""
+echo "Tool dependencies:"
+
+PKG_JSON="${CONFIG_DIR}/package.json"
+TOOL_DEPS=("zod:latest" "@opencode-ai/plugin:latest")
+
+if [ ! -f "$PKG_JSON" ]; then
+    cat > "$PKG_JSON" <<'EOF'
+{
+  "name": "opencode-config",
+  "private": true,
+  "dependencies": {
+    "zod": "latest",
+    "@opencode-ai/plugin": "latest"
+  }
+}
+EOF
+    printf '%s\n' "${GREEN}✓${RESET} Created ${PKG_JSON} with zod and @opencode-ai/plugin"
+elif command -v jq >/dev/null 2>&1; then
+    for dep in "${TOOL_DEPS[@]}"; do
+        name="${dep%%:*}"
+        version="${dep#*:}"
+        if ! tmp="$(mktemp)"; then
+            printf '%s\n' "${YELLOW}!${RESET} Failed to create temp file for ${name}; skipping" >&2
+            continue
+        fi
+        if jq --arg n "$name" --arg v "$version" \
+            '.dependencies = (.dependencies // {}) | .dependencies[$n] = (.dependencies[$n] // $v)' \
+            "$PKG_JSON" > "$tmp"; then
+            mv "$tmp" "$PKG_JSON"
+            printf '%s\n' "${GREEN}✓${RESET} Ensured ${name} present in ${PKG_JSON}"
+        else
+            rm -f "$tmp"
+            printf '%s\n' "${RED}✗${RESET} Failed to update ${PKG_JSON} for ${name} (file may be invalid JSON or unreadable; inspect ${PKG_JSON})" >&2
+        fi
+    done
+else
+    printf '%s\n' "${YELLOW}-${RESET} jq not found - add 'zod' and '@opencode-ai/plugin' to ${PKG_JSON} manually"
+fi
+
+if command -v bun >/dev/null 2>&1; then
+    if (cd "$CONFIG_DIR" && bun install --silent); then
+        printf '%s\n' "${GREEN}✓${RESET} Ran bun install in ${CONFIG_DIR}"
+    else
+        printf '%s\n' "${YELLOW}-${RESET} bun install failed - run 'bun install' manually in ${CONFIG_DIR}"
+    fi
+else
+    printf '%s\n' "${YELLOW}-${RESET} bun not found - run 'bun install' manually in ${CONFIG_DIR}"
+fi
+
 # -- Summary ----------------------------------------------------------------
 
 echo ""
@@ -171,6 +229,38 @@ if [ "$ANNOTATIONS" = true ]; then
     else
         printf '%s\n' "${RED}✗${RESET} Annotation setup failed (config install succeeded - run maintain-annotations.sh manually)" >&2
     fi
+fi
+
+# -- Annotation access for agents ---------------------------------------------
+# Agents read the annotation trees from arbitrary project directories, so
+# OpenCode needs external_directory read permission on BOTH annotation roots.
+# The config dir itself needs no entry - OpenCode always reads its own config.
+
+# Escape a string for use inside a JSON string literal. HOME may legally
+# contain quotes, backslashes, or control characters, and the emitted
+# permission block must stay copy-pasteable as valid JSON.
+json_escape() {
+    local s="$1" i ch esc
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    for ((i = 1; i < 32; i++)); do
+        printf -v ch "\\$(printf '%03o' "$i")"
+        printf -v esc '\\u%04x' "$i"
+        s=${s//"$ch"/"$esc"}
+    done
+    printf '%s' "$s"
+}
+
+if [ "$is_annotations_ok" = true ]; then
+    echo ""
+    echo "Annotation access for agents:"
+    echo 'Both entries below are required under "permission" in your opencode.json'
+    echo "(one per annotation directory - copy the block as-is):"
+    echo ""
+    printf '%s\n' "  \"external_directory\": {"
+    printf '%s\n' "    \"$(json_escape "${ANNOTATIONS_DIR}")/**\": \"allow\","
+    printf '%s\n' "    \"$(json_escape "${FRAMEXML_DIR}")/**\": \"allow\""
+    printf '%s\n' "  }"
 fi
 
 # -- Next steps -------------------------------------------------------------

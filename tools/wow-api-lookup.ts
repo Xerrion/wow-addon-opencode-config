@@ -2,10 +2,12 @@ import { tool } from "@opencode-ai/plugin/tool";
 import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 
 /**
  * wow-api-lookup: exact-symbol lookup against the curated WoW LuaLS
- * annotation tree at `~/.local/share/wow-annotations/Annotations/Core/`.
+ * annotation tree under the platform data root (`~/.local/share/wow-annotations`
+ * on macOS/Linux, `%LOCALAPPDATA%\wow-annotations` on Windows).
  *
  * Contract per ADR-0001 (`.deliverables/tech-lead/ADR-0001-rebuild-tool-surface.md`):
  *   - one arg (`query`), no mode/category/wiki flags
@@ -25,13 +27,28 @@ import { join } from "node:path";
  *   - Data/Classic.lua                       (9-line override addendum)
  */
 
-const ANCHOR_ROOT = join(homedir(), ".local/share/wow-annotations");
+// Duplicated verbatim in wow-event-info.ts and wow-blizzard-source.ts because
+// each tool file must stay self-contained (installed as standalone artifacts).
+// Must agree with maintain-annotations.sh / maintain-annotations.ps1.
+export function defaultDataRoot(
+  dirName: string,
+  platform: NodeJS.Platform = process.platform,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (platform === "win32") {
+    const localAppData = env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
+    return join(localAppData, dirName);
+  }
+  return join(homedir(), ".local", "share", dirName);
+}
+
+const ANCHOR_ROOT =
+  process.env.WOW_ANNOTATIONS_ROOT ?? defaultDataRoot("wow-annotations");
 const REL_CORE = "Annotations/Core";
 const BUDGET = 40_000;
 const MAX_QUERY_LEN = 200;
 const MAX_MATCHES_TOTAL = 8;
 const RG_MAX_COUNT_PER_FILE = 2;
-const RG_CONTEXT_BEFORE = 8;
 const SUGGESTION_CAP = 10;
 
 const BUCKETS = {
@@ -209,6 +226,19 @@ function classify(query: string): Plan {
 type RgLine = { path: string; line: number; text: string; isMatch: boolean };
 type Hit = { path: string; matchLine: number; block: string };
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
 /**
  * Strip the absolute anchor prefix if rg ever emits it. With cwd set to
  * ANCHOR_ROOT, rg uses the relative paths we pass it - but defence in
@@ -261,10 +291,6 @@ async function runRg(
     "never",
     "--no-heading",
     "--line-number",
-    "-B",
-    String(RG_CONTEXT_BEFORE),
-    "-A",
-    "1",
     "--max-count",
     String(RG_MAX_COUNT_PER_FILE),
     "--max-filesize",
@@ -275,16 +301,30 @@ async function runRg(
   }
   args.push(...roots);
 
-  const proc = Bun.spawn(["rg", ...args], {
-    cwd: ANCHOR_ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const stdout = await new Response(proc.stdout).text();
+  let proc: ReturnType<typeof Bun.spawn>;
+  try {
+    proc = Bun.spawn(["rg", ...args], {
+      cwd: ANCHOR_ROOT,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch (error) {
+    throw new Error(`wow-api-lookup: failed to launch rg: ${errorMessage(error)}`);
+  }
+  const stdout = await new Response(
+    proc.stdout as ReadableStream<Uint8Array>,
+  ).text();
   const exitCode = await proc.exited;
-  if (exitCode === 2) {
-    const err = await new Response(proc.stderr).text();
-    throw new Error(`wow-api-lookup: rg failed: ${err.trim().slice(0, 200)}`);
+  if (exitCode !== 0 && exitCode !== 1) {
+    const err = await new Response(
+      proc.stderr as ReadableStream<Uint8Array>,
+    ).text();
+    throw new Error(
+      `wow-api-lookup: rg failed with exit code ${exitCode}: ${err.trim().slice(0, 200) || "no diagnostic output"}`,
+    );
+  }
+  if (exitCode === 0 && stdout.length === 0) {
+    throw new Error("wow-api-lookup: rg returned success without output");
   }
   // exitCode 1 = no matches.
   const out: RgLine[] = [];
@@ -293,39 +333,55 @@ async function runRg(
     const parsed = parseRgLine(raw);
     if (parsed) out.push(parsed);
   }
+  if (exitCode === 0 && out.length === 0) {
+    throw new Error("wow-api-lookup: could not parse rg output");
+  }
   return out;
 }
 
-/**
- * Group rg lines into Hit blocks. Each block: the contiguous run of
- * lines (context + match + after) for a single match. Boundaries:
- * change of file OR a non-contiguous line number.
- */
-function groupHits(lines: RgLine[]): Hit[] {
-  const hits: Hit[] = [];
-  let buf: RgLine[] = [];
-  let matchLine = -1;
-  const flush = () => {
-    if (buf.length === 0 || matchLine === -1) {
-      buf = [];
-      matchLine = -1;
-      return;
-    }
-    const path = buf[0]!.path;
-    const block = buf.map((l) => l.text).join("\n");
-    hits.push({ path, matchLine, block });
-    buf = [];
-    matchLine = -1;
-  };
-  for (const l of lines) {
-    const last = buf[buf.length - 1];
-    const breaks =
-      last !== undefined && (last.path !== l.path || l.line - last.line > 1);
-    if (breaks) flush();
-    buf.push(l);
-    if (l.isMatch && matchLine === -1) matchLine = l.line;
+function extractAnnotationBlock(
+  lines: string[],
+  matchLine: number,
+): string {
+  const signatureIndex = matchLine - 1;
+  if (signatureIndex < 0 || signatureIndex >= lines.length) {
+    throw new Error(`match line ${matchLine} is outside the file`);
   }
-  flush();
+  let firstLine = signatureIndex;
+  while (firstLine > 0 && lines[firstLine - 1]!.startsWith("---")) {
+    firstLine--;
+  }
+  return lines.slice(firstLine, signatureIndex + 1).join("\n");
+}
+
+async function buildHits(lines: RgLine[]): Promise<Hit[]> {
+  const hits: Hit[] = [];
+  const files = new Map<string, string[]>();
+  for (const line of lines) {
+    let fileLines = files.get(line.path);
+    if (!fileLines) {
+      try {
+        const raw = await readFile(join(ANCHOR_ROOT, line.path), "utf8");
+        fileLines = raw.split(/\r?\n/);
+        files.set(line.path, fileLines);
+      } catch (error) {
+        throw new Error(
+          `wow-api-lookup: failed reading annotation file ${line.path}: ${errorMessage(error)}`,
+        );
+      }
+    }
+    try {
+      hits.push({
+        path: line.path,
+        matchLine: line.line,
+        block: extractAnnotationBlock(fileLines, line.line),
+      });
+    } catch (error) {
+      throw new Error(
+        `wow-api-lookup: corrupt annotation match at ${line.path}:${line.line}: ${errorMessage(error)}`,
+      );
+    }
+  }
   return hits;
 }
 
@@ -365,15 +421,13 @@ function renderHits(query: string, hits: Hit[], plan: Plan): string {
 
 /**
  * Append a Classic-override section when `Data/Classic.lua` carries a
- * matching `function <query>(...) end` stub. Best-effort; failures are
- * swallowed (the file is 9 lines, but we treat it as optional).
+ * matching `function <query>(...) end` stub. The file itself is optional;
+ * failures other than absence indicate a broken local annotation install.
  */
 async function tryClassicOverride(query: string): Promise<string | null> {
   if (!/^[A-Za-z][\w.:]*$/.test(query)) return null;
   try {
-    const raw = await Bun.file(
-      join(ANCHOR_ROOT, BUCKETS.classic),
-    ).text();
+    const raw = await readFile(join(ANCHOR_ROOT, BUCKETS.classic), "utf8");
     const lines = raw.split("\n");
     const sigRe = new RegExp(
       `^function\\s+${escapeRegex(query)}\\s*\\(`,
@@ -391,8 +445,11 @@ async function tryClassicOverride(query: string): Promise<string | null> {
         );
       }
     }
-  } catch {
-    /* missing file → skip */
+  } catch (error) {
+    if (isMissingFile(error)) return null;
+    throw new Error(
+      `wow-api-lookup: failed reading optional Classic overrides: ${errorMessage(error)}`,
+    );
   }
   return null;
 }
@@ -503,7 +560,7 @@ export default tool({
     const roots = plan.roots.map((k) => BUCKETS[k]);
 
     const rgLines = await runRg(plan.patterns, roots);
-    const hits = groupHits(rgLines);
+    const hits = await buildHits(rgLines);
 
     if (hits.length > 0) {
       let out = renderHits(q, hits, plan);

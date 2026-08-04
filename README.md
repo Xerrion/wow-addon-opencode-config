@@ -23,8 +23,13 @@ Agent, skills, commands, and custom tools for World of Warcraft addon developmen
 
 1. [OpenCode](https://opencode.ai) installed and configured
 2. [Bun](https://bun.sh) runtime (required for custom tool execution)
-3. WoW API annotations (see setup below)
-4. [luacheck](https://github.com/mpeterv/luacheck) (optional, for linting)
+3. [git](https://git-scm.com) (required for annotation setup and updates)
+4. A supported shell:
+   - **macOS / Linux**: Bash (the `.sh` scripts)
+   - **Windows**: PowerShell 5.1+ or [PowerShell 7 (`pwsh`)](https://learn.microsoft.com/powershell/) (the `.ps1` scripts)
+5. WoW API annotations (see setup below)
+6. [luacheck](https://github.com/mpeterv/luacheck) (optional, for linting)
+7. [ripgrep (`rg`)](https://github.com/BurntSushi/ripgrep) (required for local annotation and source searches)
 
 ## Quick Start
 
@@ -54,6 +59,30 @@ cd ~\Projects\wow-addon-opencode-config
 
 # 3. Install with annotations (clones Ketho + multi-flavor FrameXML)
 .\install.ps1 -Annotations
+```
+
+After annotation setup succeeds, the installer prints the fully expanded absolute paths of **both** annotation directories as a ready-to-copy `external_directory` block. Agents read the annotation trees from arbitrary project directories, so both entries must be added under `permission` in your `opencode.json` — one per annotation directory. (The OpenCode config directory itself needs no entry.)
+
+macOS / Linux:
+
+```json
+"permission": {
+  "external_directory": {
+    "/home/you/.local/share/wow-annotations/**": "allow",
+    "/home/you/.local/share/wow-framexml/**": "allow"
+  }
+}
+```
+
+Windows (forward slashes keep the paths valid JSON):
+
+```json
+"permission": {
+  "external_directory": {
+    "C:/Users/you/AppData/Local/wow-annotations/**": "allow",
+    "C:/Users/you/AppData/Local/wow-framexml/**": "allow"
+  }
+}
 ```
 
 ## Annotation Setup
@@ -90,15 +119,24 @@ Four game flavors are supported:
 
 ### Directory Structure
 
+Annotations live under the platform-native user data root:
+
+| Platform | Data root | Ketho repo | FrameXML flavors |
+| --- | --- | --- | --- |
+| macOS / Linux | `~/.local/share` | `~/.local/share/wow-annotations/` | `~/.local/share/wow-framexml/<flavor>/` |
+| Windows | `%LOCALAPPDATA%` | `%LOCALAPPDATA%\wow-annotations\` | `%LOCALAPPDATA%\wow-framexml\<flavor>\` |
+
 ```
-~/.local/share/wow-annotations/    # Ketho repo (shared APIs, widgets, events)
-~/.local/share/wow-framexml/        # Multi-flavor FrameXML
-  .bare/                            # Bare clone
-  live/                             # Retail
-  classic/                          # Classic/MoP
-  classic_era/                      # Classic Era
-  classic_anniversary/              # Anniversary Classic
+<data root>/wow-annotations/    # Ketho repo (shared APIs, widgets, events)
+<data root>/wow-framexml/       # Multi-flavor FrameXML
+  .bare/                        # Bare clone
+  live/                         # Retail
+  classic/                      # Classic/MoP
+  classic_era/                  # Classic Era
+  classic_anniversary/          # Anniversary Classic
 ```
+
+To use a custom location instead, set the `WOW_ANNOTATIONS_ROOT` and/or `WOW_FRAMEXML_ROOT` environment variables — the custom tools honor them over the platform default.
 
 ### Managing Annotations
 
@@ -130,11 +168,20 @@ The `wow-blizzard-source` tool accepts a `flavor` parameter to query FrameXML fo
 If you prefer to manage annotations manually without multi-flavor support:
 
 ```bash
-# Clone the annotation repository
+# macOS / Linux: clone the annotation repository
 git clone https://github.com/Ketho/vscode-wow-api ~/.local/share/wow-annotations
 
 # Initialize the FrameXML submodule
 cd ~/.local/share/wow-annotations
+git submodule update --init --recursive
+```
+
+```powershell
+# Windows: clone the annotation repository
+git clone https://github.com/Ketho/vscode-wow-api "$env:LOCALAPPDATA\wow-annotations"
+
+# Initialize the FrameXML submodule
+cd "$env:LOCALAPPDATA\wow-annotations"
 git submodule update --init --recursive
 ```
 
@@ -151,30 +198,55 @@ git submodule update --init --recursive
 To update to the latest config:
 
 ```bash
+# macOS / Linux
 cd ~/Projects/wow-addon-opencode-config
 git pull
 ./install.sh --force
 ```
 
+```powershell
+# Windows (PowerShell)
+cd ~\Projects\wow-addon-opencode-config
+git pull
+.\install.ps1 -Force
+```
+
 To update annotations:
 
 ```bash
-# Update all annotation repos and flavors
+# macOS / Linux: update all annotation repos and flavors
 ./maintain-annotations.sh
 
 # Or just one flavor
 ./maintain-annotations.sh --flavor live
 ```
 
+```powershell
+# Windows equivalents
+.\maintain-annotations.ps1
+.\maintain-annotations.ps1 -Flavor live
+```
+
 ## Uninstalling
 
 ```bash
+# macOS / Linux
 cd ~/Projects/wow-addon-opencode-config
 ./uninstall.sh
+```
+
+```powershell
+# Windows (PowerShell)
+cd ~\Projects\wow-addon-opencode-config
+.\uninstall.ps1
 ```
 
 Or skip the confirmation prompt:
 
 ```bash
 ./uninstall.sh --yes
+```
+
+```powershell
+.\uninstall.ps1 -Yes
 ```

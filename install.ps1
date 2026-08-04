@@ -20,6 +20,19 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 $ConfigDir = Join-Path $env:USERPROFILE ".config\opencode"
 
+# Platform-native annotation storage - must match maintain-annotations.ps1.
+# Windows: %LOCALAPPDATA%; macOS/Linux (pwsh): ~/.local/share. PowerShell 5.1
+# only runs on Windows; $IsWindows exists from 6+ (the -lt 6 check must come
+# first so 5.1 never evaluates the undefined variable).
+$IsWindowsHost = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
+$DataHome = if ($IsWindowsHost) {
+    if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE "AppData\Local" }
+} else {
+    Join-Path $HOME ".local/share"
+}
+$AnnotationsDir = Join-Path $DataHome "wow-annotations"
+$FrameXMLDir = Join-Path $DataHome "wow-framexml"
+
 # -- State ------------------------------------------------------------------
 
 $Installed = 0
@@ -32,6 +45,10 @@ if (-not (Test-Path $ConfigDir -PathType Container)) {
     Write-Host " OpenCode config directory not found. Install OpenCode first."
     exit 1
 }
+
+# Canonicalize so every message shows the fully expanded absolute path,
+# never an env-var or ~ shorthand.
+$ConfigDir = (Resolve-Path -LiteralPath $ConfigDir).ProviderPath
 
 # -- Directory name detection -----------------------------------------------
 # OpenCode supports both singular (command/) and plural (commands/) directory
@@ -187,6 +204,83 @@ foreach ($file in $toolFiles) {
     Install-ConfigItem -Source $file.FullName -Target $targetPath -Label $rel
 }
 
+# -- Tool dependencies ------------------------------------------------------
+# Tools under tools/ import 'zod' and '@opencode-ai/plugin/tool'. Declare them
+# in ~/.config/opencode/package.json so OpenCode can resolve them at runtime.
+
+Write-Host ""
+Write-Host "Tool dependencies:"
+
+$PkgJson = Join-Path $ConfigDir "package.json"
+$ToolDeps = [ordered]@{
+    "zod"                 = "latest"
+    "@opencode-ai/plugin" = "latest"
+}
+
+if (-not (Test-Path $PkgJson -PathType Leaf)) {
+    $newPkg = [ordered]@{
+        name         = "opencode-config"
+        private      = $true
+        dependencies = $ToolDeps
+    }
+    try {
+        ($newPkg | ConvertTo-Json -Depth 4) | Set-Content -Path $PkgJson -Encoding UTF8
+        Write-Host "+" -ForegroundColor Green -NoNewline
+        Write-Host " Created $PkgJson with zod and @opencode-ai/plugin"
+    }
+    catch {
+        Write-Host "X" -ForegroundColor Red -NoNewline
+        Write-Host " Failed to create ${PkgJson}: $($_.Exception.Message)"
+    }
+}
+else {
+    try {
+        $pkg = Get-Content -Path $PkgJson -Raw -Encoding UTF8 | ConvertFrom-Json
+        if (-not $pkg.PSObject.Properties.Match('dependencies').Count -or $null -eq $pkg.dependencies) {
+            $pkg | Add-Member -NotePropertyName dependencies -NotePropertyValue ([pscustomobject]@{}) -Force
+        }
+        foreach ($name in $ToolDeps.Keys) {
+            $version = $ToolDeps[$name]
+            if (-not $pkg.dependencies.PSObject.Properties.Match($name).Count) {
+                $pkg.dependencies | Add-Member -NotePropertyName $name -NotePropertyValue $version -Force
+            }
+            Write-Host "+" -ForegroundColor Green -NoNewline
+            Write-Host " Ensured $name present in $PkgJson"
+        }
+        ($pkg | ConvertTo-Json -Depth 10) | Set-Content -Path $PkgJson -Encoding UTF8
+    }
+    catch {
+        Write-Host "!" -ForegroundColor Yellow -NoNewline
+        Write-Host " Failed to update $PkgJson (file may be invalid JSON or unreadable; inspect $PkgJson)"
+    }
+}
+
+if (Get-Command bun -ErrorAction SilentlyContinue) {
+    Push-Location $ConfigDir
+    try {
+        & bun install --silent
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "+" -ForegroundColor Green -NoNewline
+            Write-Host " Ran bun install in $ConfigDir"
+        }
+        else {
+            Write-Host "-" -ForegroundColor Yellow -NoNewline
+            Write-Host " bun install failed - run 'bun install' manually in $ConfigDir"
+        }
+    }
+    catch {
+        Write-Host "-" -ForegroundColor Yellow -NoNewline
+        Write-Host " bun install failed - run 'bun install' manually in $ConfigDir"
+    }
+    finally {
+        Pop-Location
+    }
+}
+else {
+    Write-Host "-" -ForegroundColor Yellow -NoNewline
+    Write-Host " bun not found - run 'bun install' manually in $ConfigDir"
+}
+
 # -- Summary ----------------------------------------------------------------
 
 Write-Host ""
@@ -215,6 +309,26 @@ if ($Annotations) {
     }
 }
 
+# -- Annotation access for agents ---------------------------------------------
+# Agents read the annotation trees from arbitrary project directories, so
+# OpenCode needs external_directory read permission on BOTH annotation roots.
+# The config dir itself needs no entry - OpenCode always reads its own config.
+
+if ($isAnnotationsOk) {
+    Write-Host ""
+    Write-Host "Annotation access for agents:"
+    Write-Host 'Both entries below are required under "permission" in your opencode.json'
+    Write-Host "(one per annotation directory - copy the block as-is):"
+    Write-Host ""
+    # Forward slashes keep the paths valid JSON without backslash escaping.
+    $annotationsGlob = $AnnotationsDir.Replace('\', '/') + '/**'
+    $framexmlGlob = $FrameXMLDir.Replace('\', '/') + '/**'
+    Write-Host '  "external_directory": {' -ForegroundColor Cyan
+    Write-Host ('    "' + $annotationsGlob + '": "allow",') -ForegroundColor Cyan
+    Write-Host ('    "' + $framexmlGlob + '": "allow"') -ForegroundColor Cyan
+    Write-Host '  }' -ForegroundColor Cyan
+}
+
 # -- Next steps -------------------------------------------------------------
 
 Write-Host ""
@@ -227,3 +341,6 @@ else {
     Write-Host "     .\maintain-annotations.ps1"
     Write-Host "  2. See README.md for full setup instructions"
 }
+
+Write-Host ""
+Write-Host "Installed to: $ConfigDir"

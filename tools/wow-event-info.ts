@@ -2,6 +2,7 @@ import { tool } from "@opencode-ai/plugin/tool";
 import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 
 /**
  * wow-event-info: exact-match lookup of a single WoW frame event in
@@ -17,7 +18,26 @@ import { join } from "node:path";
  */
 
 const REL_PATH = "Annotations/Core/Data/Event.lua";
-const ABS_PATH = join(homedir(), ".local/share/wow-annotations", REL_PATH);
+
+// Duplicated verbatim in wow-api-lookup.ts and wow-blizzard-source.ts because
+// each tool file must stay self-contained (installed as standalone artifacts).
+// Must agree with maintain-annotations.sh / maintain-annotations.ps1.
+export function defaultDataRoot(
+  dirName: string,
+  platform: NodeJS.Platform = process.platform,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (platform === "win32") {
+    const localAppData = env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
+    return join(localAppData, dirName);
+  }
+  return join(homedir(), ".local", "share", dirName);
+}
+
+const ABS_PATH = join(
+  process.env.WOW_ANNOTATIONS_ROOT ?? defaultDataRoot("wow-annotations"),
+  REL_PATH,
+);
 const BUDGET = 40_000;
 const FAMILY_LINE_CAP = 30;
 const SUGGESTION_CAP = 20;
@@ -61,9 +81,22 @@ function parseRows(raw: string): Row[] {
         payload: m[2] ?? null,
         raw: lines[i]!,
       });
+    } else if (lines[i]!.startsWith('---|"')) {
+      throw new Error(`malformed event row at line ${i + 1}`);
     }
   }
+  if (rows.length === 0) {
+    throw new Error("catalog contains no event rows");
+  }
   return rows;
+}
+
+export function truncateUtf8(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= maxBytes) return value;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
+  return bytes.subarray(0, end).toString("utf8");
 }
 
 /**
@@ -172,6 +205,11 @@ function renderMatch(event: string, rows: Row[], idx: number): string {
     body = buildBody(lo, hi, droppedAbove, droppedBelow);
   }
 
+  if (Buffer.byteLength(body, "utf8") > BUDGET) {
+    const marker = "\n\n... [truncated to 40000-byte limit]\n";
+    return truncateUtf8(body, BUDGET - Buffer.byteLength(marker, "utf8")) + marker;
+  }
+
   return body;
 }
 
@@ -226,10 +264,7 @@ function renderNoMatch(event: string, rows: Row[]): string {
   );
   lines.push("");
 
-  const out = lines.join("\n");
-  // No-match bodies are tiny; truncation is theoretically possible only when a
-  // pathological prefix bucket is huge, and SUGGESTION_CAP already gates that.
-  return out.length > BUDGET ? out.slice(0, BUDGET) : out;
+  return truncateUtf8(lines.join("\n"), BUDGET);
 }
 
 export default tool({
@@ -252,8 +287,21 @@ export default tool({
       );
     }
 
-    const raw = await Bun.file(ABS_PATH).text();
-    const rows = parseRows(raw);
+    let raw: string;
+    try {
+      raw = await readFile(ABS_PATH, "utf8");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`wow-event-info: failed reading event catalog: ${message}`);
+    }
+
+    let rows: Row[];
+    try {
+      rows = parseRows(raw);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`wow-event-info: failed parsing event catalog: ${message}`);
+    }
 
     const idx = rows.findIndex((r) => r.name === normalised);
     if (idx === -1) {

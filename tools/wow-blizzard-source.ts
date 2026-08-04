@@ -6,24 +6,43 @@ import { existsSync } from "node:fs";
 
 /**
  * wow-blizzard-source: ripgrep over the per-flavour FrameXML annotated
- * source tree at `~/.local/share/wow-framexml/<flavor>/Annotations/`,
- * returning matched lines with bounded context.
+ * source tree at `<data root>/wow-framexml/<flavor>/Annotations/`, where the
+ * data root is `~/.local/share` on macOS/Linux and `%LOCALAPPDATA%` on
+ * Windows, returning matched lines with bounded context.
  *
  * Contract per ADR-0001 `.deliverables/tech-lead/ADR-0001-rebuild-tool-surface.md`:
  *   - three args (`pattern`, `flavor`, `scope`)
  *   - `flavor` accepts `retail` as an alias for `live` (orchestrator amendment)
- *   - returns { output, metadata: { flavor, matchCount, selfTruncated } }
+ *   - returns { output, metadata: { flavor, matchCount, selfTruncated } },
+ *     where matchCount is the number of rendered match lines
  *   - 40 KB self-cap with explicit truncation tail
  *   - throw only on invalid input or missing flavor directory; "no matches"
  *     returns a populated body with matchCount: 0
  *   - paths in output are anchor-relative (AddOns/Blizzard_X/...), never absolute
  */
 
-const FRAMEXML_ROOT = join(homedir(), ".local/share/wow-framexml");
+// Duplicated verbatim in wow-api-lookup.ts and wow-event-info.ts because
+// each tool file must stay self-contained (installed as standalone artifacts).
+// Must agree with maintain-annotations.sh / maintain-annotations.ps1.
+export function defaultDataRoot(
+  dirName: string,
+  platform: NodeJS.Platform = process.platform,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (platform === "win32") {
+    const localAppData = env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
+    return join(localAppData, dirName);
+  }
+  return join(homedir(), ".local", "share", dirName);
+}
+
+const FRAMEXML_ROOT =
+  process.env.WOW_FRAMEXML_ROOT ?? defaultDataRoot("wow-framexml");
 const BUDGET = 40_000;
 const MAX_PATTERN_LEN = 500;
 const RG_CONTEXT = 3;
 const RG_MAX_COUNT_PER_FILE = 5;
+const RG_COMMAND = process.env.WOW_RG_COMMAND ?? "rg";
 
 const FLAVOR_ENUM = ["live", "retail", "classic", "classic_anniversary", "classic_era"] as const;
 type FlavorArg = (typeof FLAVOR_ENUM)[number];
@@ -39,7 +58,7 @@ function resolveFlavor(f: FlavorArg): ResolvedFlavor {
 function globsFor(scope: Scope): string[] {
   if (scope === "lua") return ["-g", "*.lua.annotated.lua"];
   if (scope === "xml") return ["-g", "*.xml.annotated.lua"];
-  // all: include both, exclude others defensively
+  // Multiple positive globs include both annotated Lua and XML sources.
   return ["-g", "*.lua.annotated.lua", "-g", "*.xml.annotated.lua"];
 }
 
@@ -74,10 +93,7 @@ function stripPathPrefix(p: string, absRoot: string): string {
  * (the previous bug-class was leaking `/Users/...` on context lines).
  */
 function parseRgLine(raw: string, absRoot: string): RgLine | null {
-  // Anchor on the LAST occurrence of `:<digits>:` or `-<digits>-` that
-  // splits the line into (path)(sep)(line)(sep)(rest). Using a lazy head
-  // is fine because annotated paths do not contain `:` or `-` followed by
-  // digits in their leading segments on disk.
+  // The lazy path capture selects the first valid line-number separator.
   const reMatch = /^(.+?):(\d+):(.*)$/;
   const reCtx = /^(.+?)-(\d+)-(.*)$/;
   let m = reMatch.exec(raw);
@@ -121,8 +137,10 @@ function groupByFile(lines: RgLine[]): FileGroup[] {
       current = { path: l.path, lines: [], matchCount: 0 };
       groups.push(current);
     }
-    current.lines.push(l);
-    if (l.isMatch) current.matchCount += 1;
+    const isCountedMatch =
+      l.isMatch && current.matchCount < RG_MAX_COUNT_PER_FILE;
+    current.lines.push(isCountedMatch === l.isMatch ? l : { ...l, isMatch: false });
+    if (isCountedMatch) current.matchCount += 1;
   }
   return groups;
 }
@@ -170,19 +188,32 @@ async function runRg(
     ".",
   ];
 
-  const proc = Bun.spawn(["rg", ...args], {
-    cwd: absRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
+  let proc: ReturnType<typeof Bun.spawn>;
+  try {
+    proc = Bun.spawn([RG_COMMAND, ...args], {
+      cwd: absRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`wow-blizzard-source: failed to launch rg: ${message}`);
+  }
+  const stdout = await new Response(
+    proc.stdout as ReadableStream<Uint8Array>,
+  ).text();
+  const stderr = await new Response(
+    proc.stderr as ReadableStream<Uint8Array>,
+  ).text();
   const exitCode = await proc.exited;
   const lines: RgLine[] = [];
   for (const raw of stdout.split("\n")) {
     if (raw === "" || raw === "--") continue;
     const parsed = parseRgLine(raw, absRoot);
     if (parsed) lines.push(parsed);
+  }
+  if (exitCode === 0 && lines.length === 0) {
+    throw new Error("wow-blizzard-source: rg returned unparseable output");
   }
   return { lines, exitCode, stderr };
 }
@@ -192,7 +223,7 @@ function renderNoMatch(
   flavor: ResolvedFlavor,
   scope: Scope,
 ): string {
-  const relRoot = `~/.local/share/wow-framexml/${flavor}/Annotations/`;
+  const relRoot = `wow-framexml/${flavor}/Annotations/`;
   return [
     `# ${pattern} (flavor: ${flavor}, scope: ${scope})`,
     "",
@@ -206,7 +237,7 @@ function renderNoMatch(
 
 export default tool({
   description:
-    "Ripgrep over the per-flavor WoW FrameXML annotated source tree (~/.local/share/wow-framexml/<flavor>/Annotations/). Returns matched lines with 3 lines of context, capped at 5 matches per file and 40 KB total. Scope filters by *.lua.annotated.lua, *.xml.annotated.lua, or both.",
+    "Ripgrep over the per-flavor WoW FrameXML annotated source tree (wow-framexml/<flavor>/Annotations/ under the platform data root: ~/.local/share on macOS/Linux, %LOCALAPPDATA% on Windows). Returns matched lines with 3 lines of context, capped at 5 matches per file and 40 KB total. Scope filters by *.lua.annotated.lua, *.xml.annotated.lua, or both.",
   args: {
     pattern: z.string().min(1),
     flavor: z.enum(FLAVOR_ENUM).default("live"),
@@ -242,7 +273,11 @@ export default tool({
         `wow-blizzard-source: invalid regex: ${stderr.trim().slice(0, 200)}`,
       );
     }
-    // exitCode 1 = no matches; exitCode 0 = matches.
+    if (exitCode !== 0 && exitCode !== 1) {
+      throw new Error(
+        `wow-blizzard-source: rg failed with exit code ${exitCode}: ${stderr.trim().slice(0, 200) || "no diagnostic output"}`,
+      );
+    }
 
     const groups = groupByFile(lines);
     const totalMatches = groups.reduce((sum, g) => sum + g.matchCount, 0);
@@ -280,17 +315,16 @@ export default tool({
 
     if (selfTruncated) {
       const remainingFiles = groups.length - filesRendered;
-      const remainingMatches = totalMatches - matchesRendered;
-      body += `... output truncated at 40 KB; ${remainingMatches} more matches across ${remainingFiles} more files not shown. Narrow your pattern, or restrict scope to lua/xml only.\n`;
+      body += `... output truncated at 40 KB; at least ${remainingFiles} more file(s) have matches not shown. Counts are capped at ${RG_MAX_COUNT_PER_FILE} matches per file; narrow your pattern, or restrict scope to lua/xml only.\n`;
     } else {
-      body += `---\nMatched ${totalMatches} line(s) across ${groups.length} file(s). Searched ~/.local/share/wow-framexml/${resolved}/Annotations/ (scope: ${scope}).\n`;
+      body += `---\nReported ${totalMatches} match(es) across ${groups.length} file(s), capped at ${RG_MAX_COUNT_PER_FILE} per file; files reaching the cap may contain more. Searched wow-framexml/${resolved}/Annotations/ (scope: ${scope}).\n`;
     }
 
     return {
       output: body,
       metadata: {
         flavor: resolved,
-        matchCount: totalMatches,
+        matchCount: matchesRendered,
         selfTruncated,
       },
     };
